@@ -1,0 +1,7 @@
+<Solution>
+ <Project Path="src/WinToPod.Core/WinToPod.Core.csproj" />
+ <Project Path="src/WinToPod.AirPlay/WinToPod.AirPlay.csproj" />
+ <Project Path="src/WinToPod.Discovery/WinToPod.Discovery.csproj" />
+ <Project Path="src/WinToPod.Desktop/WinToPod.Desktop.csproj" />
+ <Project Path="src/WinToPod.Checks/WinToPod.Checks.csproj" />
+</Solution>

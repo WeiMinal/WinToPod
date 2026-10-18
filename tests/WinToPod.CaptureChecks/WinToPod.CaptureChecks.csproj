@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/WinToPod.Core/WinToPod.Core.csproj" />
+    <Compile Include="../../src/WinToPod.Desktop/AudioSources.cs" Link="Production/AudioSources.cs" />
+    <Compile Include="../../src/WinToPod.Desktop/EndpointVolumeLink.cs" Link="Production/EndpointVolumeLink.cs" />
+  </ItemGroup>
+</Project>

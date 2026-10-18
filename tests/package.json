@@ -1,0 +1,10 @@
+{
+  "name": "wintopod-validation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Optional synthetic browser checks; not shipped with the Windows app",
+  "devDependencies": {
+    "playwright": "1.62.1",
+    "pngjs": "7.0.0"
+  }
+}

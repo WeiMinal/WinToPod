@@ -1,0 +1,2 @@
+cryptography>=44
+srptools==1.0.1

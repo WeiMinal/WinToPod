@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../WinToPod.Core/WinToPod.Core.csproj" /><ProjectReference Include="../WinToPod.AirPlay/WinToPod.AirPlay.csproj" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Fixtures/*" /></ItemGroup>
+</Project>

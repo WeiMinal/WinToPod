@@ -36,6 +36,33 @@ internal static class VideoSyncChecks
                 Check("atomic read-only protocol state", json.RootElement.GetProperty("protocol").GetString() == "WinToPod.VideoSync/1" && json.RootElement.GetProperty("delayMs").GetInt32() == 2010 && json.RootElement.EnumerateObject().Count() == 3);
             Check("audio connected does not claim browser frames exist", !bridge.CompanionStatus.Detected);
             using (var response = await http.PostAsync(url, new StringContent("{}"))) Check("commands rejected", response.StatusCode == HttpStatusCode.BadRequest);
+            foreach (var length in new[] { 2, 128, 768 })
+            {
+                using var response = await http.PostAsync(url, new StringContent(new string('x', length)));
+                Check($"rejected {length}-byte body returns complete JSON", response.StatusCode == HttpStatusCode.BadRequest && await response.Content.ReadAsStringAsync() == "{}");
+            }
+            using (var client = new TcpClient())
+            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            {
+                await client.ConnectAsync(IPAddress.Loopback, bridge.Port, timeout.Token);
+                using var stream = client.GetStream();
+                // Split the body across writes to prove the server consumes it before closing.
+                // A single write can hide this bug on Linux while Windows sends a connection reset.
+                var request = Encoding.ASCII.GetBytes($"POST /video-sync HTTP/1.1\r\nHost: 127.0.0.1:{bridge.Port}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{");
+                await stream.WriteAsync(request, timeout.Token);
+                var firstByte = new byte[1];
+                var pending = stream.ReadAsync(firstByte, timeout.Token).AsTask();
+                var early = await Task.WhenAny(pending, Task.Delay(150, timeout.Token)) == pending;
+                await stream.WriteAsync("}"u8.ToArray(), timeout.Token);
+                using var response = new MemoryStream();
+                var count = await pending;
+                if (count > 0) response.Write(firstByte, 0, count);
+                await stream.CopyToAsync(response, timeout.Token);
+                var text = Encoding.ASCII.GetString(response.ToArray());
+                Check("rejected fragmented body is consumed before responding", !early);
+                Check("rejected fragmented request closes with complete response", text.StartsWith("HTTP/1.1 400 Bad Request\r\n", StringComparison.Ordinal) && text.EndsWith("\r\n\r\n{}", StringComparison.Ordinal));
+                Check("rejected bodies leave bridge online and telemetry unchanged", !bridge.CompanionStatus.Detected && (await http.GetStringAsync(url)).Contains("WinToPod.VideoSync/1", StringComparison.Ordinal));
+            }
             using (var request = new HttpRequestMessage(HttpMethod.Get, url))
             {
                 request.Headers.Host = "attacker.example";

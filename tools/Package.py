@@ -65,10 +65,10 @@ def main():
         protocol_simulations=protocols or None, optional_checks=optional,
         real_homepod_tested_for_this_build=False, actual_windows_capture_tested=False,
         actual_multi_monitor_dpi_tested=False, code_signed=False, remote_repository_pushed=False)
-    report_path = validation / 'release.json'; report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    report_path = validation / 'release.json'; report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     package = output / 'WinToPod-V1.0-win-x64.zip'; source = output / 'WinToPod-V1.0-source.zip'
     sums = output / 'SHA256SUMS.txt'
-    exe_sum = validation / 'exe-sha256.txt'; exe_sum.write_text(inspected['exe_sha256'] + '  WinToPod.exe\n')
+    exe_sum = validation / 'exe-sha256.txt'; exe_sum.write_text(inspected['exe_sha256'] + '  WinToPod.exe\n', encoding='utf-8')
     members = [(executable, 'WinToPod.exe'), (ROOT / 'docs/USAGE.md', '使用说明.md'), (ROOT / 'LICENSE', 'LICENSE'),
                (ROOT / 'CHANGELOG.md', 'CHANGELOG.md'), (ROOT / 'THIRD-PARTY.md', 'THIRD-PARTY.md'),
                (ROOT / 'docs/PRIVACY.md', 'docs/PRIVACY.md'), (report_path, 'docs/VALIDATION.json'), (exe_sum, 'SHA256SUMS.txt')]
@@ -78,8 +78,8 @@ def main():
     zip_atomic(package, members, zipfile.ZIP_STORED)
     zip_atomic(source, [(p, 'WinToPod/' + p.relative_to(ROOT).as_posix()) for p in public_files()], zipfile.ZIP_DEFLATED)
     integrity = {p.name: {'bytes': p.stat().st_size, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in [package, source]}
-    sums.write_text(''.join(row['sha256'] + '  ' + name + '\n' for name, row in integrity.items()))
-    (output / 'integrity.json').write_text(json.dumps(integrity, indent=2) + '\n')
+    sums.write_text(''.join(row['sha256'] + '  ' + name + '\n' for name, row in integrity.items()), encoding='utf-8')
+    (output / 'integrity.json').write_text(json.dumps(integrity, indent=2) + '\n', encoding='utf-8')
     shutil.copyfile(ROOT / 'docs/USAGE.md', output / 'WinToPod-V1.0-使用说明.md')
     print(json.dumps(integrity, indent=2))
 

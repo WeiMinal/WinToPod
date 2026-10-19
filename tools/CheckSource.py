@@ -38,9 +38,9 @@ def check():
                 problems.append('Private key: ' + rel)
             if re.search(r'\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})', text):
                 problems.append('Access token: ' + rel)
-    props = (ROOT / 'Directory.Build.props').read_text()
+    props = (ROOT / 'Directory.Build.props').read_text(encoding='utf-8')
     if '<Version>1.0.0</Version>' not in props: problems.append('Product version differs from V1.0')
-    manifest = json.loads((ROOT / 'browser/WinToPod.VideoSync/manifest.json').read_text())
+    manifest = json.loads((ROOT / 'browser/WinToPod.VideoSync/manifest.json').read_text(encoding='utf-8'))
     if manifest['version'] != '1.0.0': problems.append('Companion version differs from V1.0')
     for name in manifest['icons'].values():
         if not (ROOT / 'browser/WinToPod.VideoSync' / name).is_file(): problems.append('Missing browser icon: ' + name)

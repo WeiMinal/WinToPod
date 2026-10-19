@@ -16,6 +16,5 @@
     <ProjectReference Include="../WinToPod.AirPlay/WinToPod.AirPlay.csproj" />
     <ProjectReference Include="../WinToPod.Core/WinToPod.Core.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
 </Project>

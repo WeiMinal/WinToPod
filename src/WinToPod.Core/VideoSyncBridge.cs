@@ -57,6 +57,16 @@ public sealed class VideoSyncBridge : IDisposable
             if (n >= 4 && header[n - 4] == 13 && header[n - 3] == 10 && header[n - 2] == 13 && header[n - 1] == 10) break;
         }
         var lines = Encoding.ASCII.GetString(header.ToArray()).Split("\r\n");
+        var lengths = lines.Where(l => l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var chunked = lines.Any(l => l.StartsWith("Transfer-Encoding:", StringComparison.OrdinalIgnoreCase));
+        var length = 0;
+        var boundedBody = !chunked && lengths.Length == 1 &&
+            int.TryParse(lengths[0][15..].Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out length) &&
+            length is >= 0 and <= 768;
+        // Consume bounded request bodies even when the method or origin is rejected.
+        // Closing with unread bytes can reset the TCP connection on Windows and lose the 400 response.
+        var payload = boundedBody ? new byte[length] : Array.Empty<byte>();
+        if (payload.Length > 0) await stream.ReadExactlyAsync(payload, token).ConfigureAwait(false);
         var host = lines.FirstOrDefault(l => l.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))?[5..].Trim();
         var valid = lines[0] == "GET /video-sync HTTP/1.1" && host == $"127.0.0.1:{Port}" &&
             !lines.Any(l => l.StartsWith("Transfer-Encoding:", StringComparison.OrdinalIgnoreCase) || l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
@@ -65,10 +75,8 @@ public sealed class VideoSyncBridge : IDisposable
         var accepted = false;
         if (lines[0] == "POST /video-sync/companion HTTP/1.1" && extensionOrigin && host == $"127.0.0.1:{Port}" &&
             lines.Count(l => l.StartsWith("Host:", StringComparison.OrdinalIgnoreCase)) == 1 && lines.Count(l => l.StartsWith("Origin:", StringComparison.OrdinalIgnoreCase)) == 1 &&
-            !lines.Any(l => l.StartsWith("Transfer-Encoding:", StringComparison.OrdinalIgnoreCase)) && lines.Count(l => l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) == 1 &&
-            int.TryParse(lines.FirstOrDefault(l => l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))?[15..].Trim(), out var length) && length is > 0 and <= 768)
+            boundedBody && length > 0)
         {
-            var payload = new byte[length]; await stream.ReadExactlyAsync(payload, token).ConfigureAwait(false);
             try
             {
                 using var report = JsonDocument.Parse(payload); var value = report.RootElement;

@@ -1,4 +1,4 @@
-name: Windows build and checks
+name: Windows build and release
 on:
   push:
     branches: [main]
@@ -10,17 +10,51 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 25
+    concurrency:
+      group: windows-release-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
-      - name: Build and check
+      - name: Check public source
+        run: python tools/CheckSource.py
+      - name: Check release publication guards
+        shell: pwsh
+        run: ./tests/ReleasePublicationChecks.ps1
+      - name: Build and check WinUI and root launcher
         shell: pwsh
         run: ./tools/Build.ps1 -WindowsSelfCheck
-      - name: Check public files
-        run: python tools/CheckSource.py
-      - name: Package locally
+      - name: Inspect and package
         run: python tools/Package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinToPod-V1.1
+          path: artifacts/release/*
+          if-no-files-found: error
+      - name: Publish version update
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WINTOPOD_RELEASE_TARGET: ${{ github.sha }}
+          WINTOPOD_RELEASE_PREVIOUS_HEAD: ${{ github.event.forced && github.event.before || '' }}
+        run: |
+          $changed = git diff HEAD^ HEAD --name-only -- Directory.Build.props
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot determine version change' }
+          if ($changed) { ./tools/PublishRelease.ps1 -RewritePreviousHead $env:WINTOPOD_RELEASE_PREVIOUS_HEAD }
+      - name: Preserve failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics
+          path: |
+            artifacts/validation/
+            ~/AppData/Local/WinToPod/winui-startup*
+          if-no-files-found: ignore

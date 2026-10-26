@@ -15,7 +15,8 @@ namespace WinToPod.AirPlay.Media;
 
 public sealed record AudioSessionOptions(IPAddress RemoteAddress, int Port, IPAddress LocalAddress,
     string? Password, int Volume, IPAddress[]? TimingPeers = null, IReadOnlyDictionary<string, string?>? AdvertisedProperties = null,
-    PtpTestPorts? LoopbackTestPorts = null, string? SenderIdentity = null, string? ReceiverId = null);
+    PtpTestPorts? LoopbackTestPorts = null, string? SenderIdentity = null, string? ReceiverId = null,
+    ReceiverVolumeCurve VolumeCurve = ReceiverVolumeCurve.Native);
 
 // Only the independent loopback harness may relocate privileged UDP ports.
 // Desktop calls never set this; actual AirPlay always uses 319 and 320.
@@ -287,31 +288,37 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
         {
         EnsureOwned(); _ptp?.Read();
         if (percent == 0) _pcmMuted = true;
-        var db = VolumeDb(percent);
+        var db = ReceiverVolume.Decibels(percent, _options.VolumeCurve);
         var set = await _rtsp.RequestAsync("SET_PARAMETER", _url, Encoding.ASCII.GetBytes("volume: " + db.ToString("F6", CultureInfo.InvariantCulture) + "\r\n"), "text/parameters", cancellation: cancellation).ConfigureAwait(false);
         set.RequireSuccess("设置音量");
-        var get = await _rtsp.RequestAsync("GET_PARAMETER", _url, "volume\r\n"u8.ToArray(), "text/parameters", cancellation: cancellation).ConfigureAwait(false);
-        get.RequireSuccess("确认音量");
-        var line = Encoding.ASCII.GetString(get.Body).Split('\n').FirstOrDefault(l => l.TrimStart().StartsWith("volume:", StringComparison.OrdinalIgnoreCase));
-        var actual = double.NaN;
-        var valid = line is not null && double.TryParse(line[(line.IndexOf(':') + 1)..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out actual) && double.IsFinite(actual) && actual is >= -144.25 and <= 0.25;
-        // A mute is a state, not an exact attenuation measurement. Receivers can
-        // read back the floor or previous level after accepting -144 dB. Zero
-        // PCM below guarantees sender silence while keeping the same session.
-        _volumeConfirmed = valid && (percent == 0 || Math.Abs(actual - db) <= 0.25);
-        _diagnostic?.Invoke($"音量确认：requested={db:F3}dB; readback={(double.IsFinite(actual) ? actual.ToString("F3", CultureInfo.InvariantCulture) : "invalid")}dB; mute={percent == 0}; accepted={_volumeConfirmed}。");
-        if (_volumeConfirmed)
+        var result = await VolumeConfirmation.ReadAsync(db, percent == 0, ReadVolumeDbAsync, cancellation,
+            (attempt, actual, confirmed) => _diagnostic?.Invoke($"音量确认：requested={db:F3}dB; readback={actual:F3}dB; mute={percent == 0}; accepted={confirmed}; attempt={attempt}/4。")).ConfigureAwait(false);
+        EnsureOwned(); _ptp?.Read();
+        if (result.Confirmed)
         {
-            LastConfirmedVolume = percent; _pcmMuted = percent == 0; _muteReadbackDb = percent == 0 ? actual : null;
+            _volumeConfirmed = true;
+            LastConfirmedVolume = percent; _pcmMuted = percent == 0; _muteReadbackDb = percent == 0 ? result.ActualDecibels : null;
         }
-        else Fail(new IOException("Volume read-back was not confirmed."));
-        return _volumeConfirmed;
+        else _diagnostic?.Invoke("音量暂未确认：有限次读回仍不匹配；保留上次确认状态，不判定音箱失联，不重复设置音量。");
+        return result.Confirmed;
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
         catch (Exception e) { _volumeConfirmed = false; Fail(e); throw; }
     }
 
+    private async Task<double> ReadVolumeDbAsync(CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested(); EnsureOwned(); _ptp?.Read();
+        var get = await _rtsp.RequestAsync("GET_PARAMETER", _url, "volume\r\n"u8.ToArray(), "text/parameters", cancellation: cancellation).ConfigureAwait(false);
+        get.RequireSuccess("读取音量");
+        var line = Encoding.ASCII.GetString(get.Body).Split('\n').FirstOrDefault(l => l.TrimStart().StartsWith("volume:", StringComparison.OrdinalIgnoreCase));
+        if (line is null || !double.TryParse(line[(line.IndexOf(':') + 1)..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var db) ||
+            !double.IsFinite(db) || db is < -144.25 or > .25) throw new InvalidDataException("音箱返回了无效音量。");
+        EnsureOwned(); return db;
+    }
+
     public static double VolumeDb(int percent)
-    { if (percent is < 0 or > 100) throw new ArgumentOutOfRangeException(nameof(percent)); return percent == 0 ? -144 : -30 + percent * 0.3; }
+        => ReceiverVolume.Decibels(percent);
 
     public async Task RunAsync(Func<Memory<byte>, CancellationToken, ValueTask> readPcm, TimeSpan? duration, CancellationToken cancellation)
         => await RunMembersAsync([this], readPcm, duration, cancellation).ConfigureAwait(false);
@@ -328,16 +335,12 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
         EnsureOwned();
         try
         {
-            _ptp?.Read();
-            var get = await _rtsp.RequestAsync("GET_PARAMETER", _url, "volume\r\n"u8.ToArray(), "text/parameters", cancellation: cancellation).ConfigureAwait(false);
-            get.RequireSuccess("读取音量");
-            var line = Encoding.ASCII.GetString(get.Body).Split('\n').FirstOrDefault(l => l.TrimStart().StartsWith("volume:", StringComparison.OrdinalIgnoreCase));
-            if (line is null || !double.TryParse(line[(line.IndexOf(':') + 1)..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var db) || !double.IsFinite(db) || db > 0.25 || db < -144.25)
-                throw new InvalidDataException("音箱返回了无效音量。");
-            EnsureOwned();
+            var db = await ReadVolumeDbAsync(cancellation).ConfigureAwait(false);
             if (_pcmMuted && (db <= -29.75 || _muteReadbackDb is { } prior && Math.Abs(db - prior) <= .25)) return 0;
             _pcmMuted = db <= -30; _muteReadbackDb = null;
-            return db <= -30 ? 0 : Math.Clamp((int)Math.Round((db + 30) / 0.3), 0, 100);
+            if (!_pcmMuted && LastConfirmedVolume is int confirmed && confirmed > 0 &&
+                Math.Abs(db - ReceiverVolume.Decibels(confirmed, _options.VolumeCurve)) <= .25) return confirmed;
+            return ReceiverVolume.Percent(db, _options.VolumeCurve);
         }
         catch (Exception e) { Fail(e, "volume"); throw _backgroundFailure ?? e; }
     }

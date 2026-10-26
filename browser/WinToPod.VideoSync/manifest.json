@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WinToPod 音画补偿助手",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "安装后B站自动跟随WinToPod音箱连接，无需填写延迟。其他网站可单独授权。",
   "permissions": [
     "scripting",

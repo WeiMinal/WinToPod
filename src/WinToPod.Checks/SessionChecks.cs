@@ -13,6 +13,40 @@ internal static class SessionChecks
 {
     public static IEnumerable<(string Name, Func<Task> Run)> All()
     {
+        yield return Check("桌面音量：试听参考点一致、全程平滑递增且不放大", () =>
+        {
+            const ReceiverVolumeCurve curve = ReceiverVolumeCurve.DesktopCalibrated;
+            True(Math.Abs(ReceiverVolume.Decibels(25, curve) - (-25.5)) < 1e-9);
+            True(Math.Abs(ReceiverVolume.Decibels(50, curve) - (-19.5)) < 1e-9);
+            True(ReceiverVolume.Decibels(0, curve) == -144 && ReceiverVolume.Decibels(100, curve) == 0);
+            for (var p = 1; p <= 100; p++)
+            {
+                var db = ReceiverVolume.Decibels(p, curve);
+                True(db > -30 && db <= RealtimeAudioSession.VolumeDb(p) + 1e-9);
+                if (p > 1) True(db > ReceiverVolume.Decibels(p - 1, curve) && db - ReceiverVolume.Decibels(p - 1, curve) < .53);
+            }
+        });
+        yield return Check("桌面音量：协议六位小数读回与正反向映射无漂移", () =>
+        {
+            foreach (var curve in Enum.GetValues<ReceiverVolumeCurve>())
+                for (var p = 0; p <= 100; p++)
+                {
+                    var db = double.Parse(ReceiverVolume.Decibels(p, curve).ToString("F6", System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
+                    True(ReceiverVolume.Percent(db, curve) == p);
+                }
+            const ReceiverVolumeCurve desktop = ReceiverVolumeCurve.DesktopCalibrated;
+            True(ReceiverVolume.Percent(RealtimeAudioSession.VolumeDb(15), desktop) == 25);
+            True(ReceiverVolume.Percent(RealtimeAudioSession.VolumeDb(35), desktop) == 50);
+        });
+        yield return Check("桌面音量：静音边界与非法输入明确处理", () =>
+        {
+            True(ReceiverVolume.Percent(-144, ReceiverVolumeCurve.DesktopCalibrated) == 0);
+            True(ReceiverVolume.Percent(-29.99, ReceiverVolumeCurve.DesktopCalibrated) == 1);
+            True(ReceiverVolume.Percent(.1, ReceiverVolumeCurve.DesktopCalibrated) == 100);
+            Throws<ArgumentOutOfRangeException>(() => ReceiverVolume.Decibels(-1));
+            Throws<ArgumentOutOfRangeException>(() => ReceiverVolume.Decibels(101));
+            Throws<ArgumentOutOfRangeException>(() => ReceiverVolume.Percent(double.NaN));
+        });
         yield return Check("TLV拒绝：保留接收端等待时间，不误判为密码或丢失成员上下文", () =>
         {
             var fields = Tlv8.Decode(Tlv8.Encode((Tlv8.State, [4]), (Tlv8.Error, [2]), (Tlv8.RetryDelay, [4])));

@@ -11,7 +11,7 @@ from receiver_simulator import Peer
 async def main():
     dotnet, assembly = sys.argv[1:3]
     results = []
-    for mode in ['setup-rejected', 'fallback-setup-rejected', 'in-session-test', 'normal', 'no-clock', 'reject-stream', 'interrupt', 'clock-loss', 'volume-reject', 'volume-change', 'reject-auth',
+    for mode in ['calibrated-exact', 'calibrated-rounded', 'setup-rejected', 'fallback-setup-rejected', 'in-session-test', 'normal', 'no-clock', 'reject-stream', 'interrupt', 'clock-loss', 'volume-reject', 'volume-change', 'reject-auth',
                  'fallback-accept', 'fallback-decline', 'fallback-cancel', 'fallback-volume-reject', 'fallback-remembered',
                  'password-required', 'password-cancel', 'password-cancel-token', 'password-supplied', 'password-both', 'password-live-only',
                  'no-password', 'wrong-password', 'wrong-password-no-delay', 'fallback-wrong-password', 'fallback-wrong-password-no-delay',
@@ -19,6 +19,8 @@ async def main():
         if len(sys.argv) > 3 and mode not in sys.argv[3:]:
             continue
         leader_mode = 'ptp-native-' + mode if mode in ['volume-reject', 'volume-change'] or mode.startswith('mute-') else 'ptp-native-normal'
+        if mode == 'calibrated-exact':
+            leader_mode = 'ptp-native-calibrated-exact'
         if mode == 'fallback-volume-reject':
             leader_mode = 'ptp-native-volume-reject'
         secondary_mode = 'ptp-native-' + mode if mode in ['no-clock', 'reject-stream', 'interrupt', 'clock-loss', 'reject-auth'] else 'ptp-native-normal'
@@ -61,6 +63,16 @@ async def main():
             secondary_verify = 0 if secondary_setup < 3 or mode in ['bad-m6-signature', 'reject-m6'] else 1 if mode in ['bad-verify-signature', 'wrong-verify-id', 'reject-verify', 'reject-verify-no-delay'] else 4 if mode == 'cache-reconnect' else 3 if mode == 'cache-verify-rejected' else 2
             assert secondary.methods.count('POST /pair-verify') == secondary_verify, 'Unexpected verify/re-pair retry'
             assert len(set(primary.pairing_client_ids + secondary.pairing_client_ids)) == 1, 'Sender identity differs between members or pairing steps'
+            if mode.startswith('calibrated-'):
+                assert all(p.audio_packets == 0 for p in peers), 'Control-only test unexpectedly sent PCM'
+                assert abs(primary.requested_volume_db - (-19.5)) < .000001
+                assert primary.volume == 35, 'New 50% did not reach the previous 35% level'
+                assert 'SET_PARAMETER /session' not in secondary.methods and 'GET_PARAMETER /session' not in secondary.methods
+                assert all('TEARDOWN /session' in p.methods for p in peers)
+                results.append({'mode': 'native-pair-' + mode, 'passed': True, 'control_only': True,
+                                'slider_positions_checked': 17, 'leader_only_volume': True, 'streaming_tested': False})
+                print(mode + ': passed', file=sys.stderr)
+                continue
             if mode == 'cache-verify-rejected':
                 for peer in peers:
                     tail = peer.methods[len(peer.methods) - 1 - peer.methods[::-1].index('GET /info'):]

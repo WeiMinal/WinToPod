@@ -66,3 +66,34 @@ using (var source = await LoopbackAudioSource.OpenAsync(null, CancellationToken.
 Console.WriteLine(JsonSerializer.Serialize(new { passed = true, checks = processChecks, production_audio_source_linked = true, process_boundary_simulated = true, actual_windows_activation_tested = false }));
 Console.WriteLine(JsonSerializer.Serialize(new { passed = true, checks = volumeChecks, production_endpoint_link_linked = true, endpoint_boundary_simulated = true, saved_receiver_scale_unchanged = true, hardware_loudness_tested = false }));
 Console.WriteLine(JsonSerializer.Serialize(new { passed = true, checks, production_audio_source_linked = true, driver_boundary_simulated = true, actual_wasapi_tested = false, homepod_tested = false, fixed_pcm_gain = 1.0 }));
+
+// Regression for an explicitly selected Windows endpoint bypassing pre-master capture.
+using (var source = await LoopbackAudioSource.OpenAsync("synthetic-capture", CancellationToken.None, requirePreMaster: true))
+{
+    if (source.CaptureMode != "application-mix-pre-master") throw new Exception("Explicit endpoint reintroduced post-master capture.");
+    var process = ProcessAudioCapture.Instances.Last();
+    byte[] quiet = [1, 0, 255, 255];
+    foreach (var percent in new[] { 1, 5, 8, 15, 16, 33, 100 })
+    {
+        NAudio.CoreAudioApi.MMDevice.Latest.AudioEndpointVolume.External(percent / 100f, percent == 5);
+        process.Emit(quiet); var output = new byte[4]; await source.ReadAsync(output, CancellationToken.None);
+        if (!output.SequenceEqual(quiet)) throw new Exception("Pre-master source changed quiet sample detail.");
+    }
+}
+ProcessAudioCapture.ActivationError = new IOException("simulated activation failure");
+try
+{
+    using var unexpected = await LoopbackAudioSource.OpenAsync("synthetic-capture", CancellationToken.None, requirePreMaster: true);
+    throw new Exception("Strict capture silently fell back.");
+}
+catch (IOException e) when (e.InnerException == ProcessAudioCapture.ActivationError) { }
+finally { ProcessAudioCapture.ActivationError = null; }
+ProcessAudioCapture.Supported = false;
+try
+{
+    using var unexpected = await LoopbackAudioSource.OpenAsync(null, CancellationToken.None, requirePreMaster: true);
+    throw new Exception("Unsupported system silently fell back.");
+}
+catch (PlatformNotSupportedException) { }
+finally { ProcessAudioCapture.Supported = true; }
+Console.WriteLine(JsonSerializer.Serialize(new { passed = true, checks = new[] { "explicit output selection preserves pre-master capture", "quiet signed samples remain unchanged at 1/5/8/15/16/33/100 percent and mute", "activation error cannot silently fall back to double attenuation", "unsupported system cannot silently fall back" }, windows_capture_tested = false }));

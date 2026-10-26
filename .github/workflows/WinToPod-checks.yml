@@ -1,4 +1,4 @@
-name: WinToPod checks
+name: Cross-platform core checks
 on:
   push:
   pull_request:
@@ -12,16 +12,12 @@ jobs:
         os: [ubuntu-latest, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
-      - run: dotnet build WinToPod.slnx -c Release
+      - run: dotnet build src/WinToPod.Checks -c Release -m:1
       - run: dotnet run --project src/WinToPod.Checks -c Release --no-build
-      - name: Windows desktop construction smoke check
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          dotnet run --project src/WinToPod.Desktop -c Release --no-build -- --self-check desktop-check.json
-          if ($LASTEXITCODE -ne 0) { throw "Desktop self-check process failed" }
-          if (-not (Get-Content desktop-check.json -Raw | ConvertFrom-Json).passed) { throw "Desktop self-check failed" }
+      - run: python tools/CheckSource.py

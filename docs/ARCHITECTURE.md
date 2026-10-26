@@ -2,7 +2,8 @@
 
 | 组件 | 职责 |
 | --- | --- |
-| WinToPod.Desktop | WinForms 原生窗口/属性页，WPF Fluent 首页，WASAPI/应用混音采集，托盘、主题、输入门控和本地凭据适配。 |
+| WinToPod.WinUI | WinUI 3 窗口、分层设置、托盘、主题、连接生命周期和系统输出切换。 |
+| WinToPod.Desktop | 共享 Windows 服务与品牌素材：WASAPI/应用混音采集、音量联动、输入门控及本地凭据。 |
 | WinToPod.Core | 现行自动连接策略、PCM 缓冲/合并、连接内测试音、采集延迟估算、视频状态桥及诊断过滤。 |
 | WinToPod.AirPlay | DNS-SD/mDNS 解析、原生对识别、SRP/完整配对与验证、加密 RTSP、Digest、事件通道、ALAC/RTP 以及 NTP/PTP 时钟。 |
 | WinToPod.Discovery | 独立的命令行扫描入口，不发起配对、播放或音量控制。 |

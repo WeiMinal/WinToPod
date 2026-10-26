@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>WinToPod</AssemblyName>
+    <RootNamespace>WinToPod.WinUI</RootNamespace>
+    <UseWinUI>true</UseWinUI>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
+    <AppxGeneratePriEnabled>false</AppxGeneratePriEnabled>
+    <EnablePriGenTooling>false</EnablePriGenTooling>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>../WinToPod.Desktop/Assets/Brand/WinToPod.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Update="Microsoft.NETCore.App" RuntimeFrameworkVersion="10.0.13" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+    <ProjectReference Include="../WinToPod.Core/WinToPod.Core.csproj" />
+    <ProjectReference Include="../WinToPod.AirPlay/WinToPod.AirPlay.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../WinToPod.Desktop/Assets/DeviceIcons/*.svg" LogicalName="WinToPod.DeviceIcons.%(Filename)%(Extension)" />
+    <Compile Include="../WinToPod.Desktop/AudioSources.cs;../WinToPod.Desktop/ProcessAudioCapture.cs;../WinToPod.Desktop/EndpointVolumeLink.cs;../WinToPod.Desktop/DesktopSettings.cs;../WinToPod.Desktop/DesktopPairingStore.cs;../WinToPod.Desktop/DesktopPlaybackCredentialStore.cs;../WinToPod.Desktop/VideoPlayerSession.cs;../WinToPod.Desktop/LocalUseMonitor.cs;../WinToPod.Desktop/FrontendState.cs" Link="Services/%(Filename)%(Extension)" />
+    <Content Include="../WinToPod.Desktop/Assets/Brand/*.ico;../WinToPod.Desktop/Assets/Brand/*-16.png;../WinToPod.Desktop/Assets/Brand/*-40.png;../WinToPod.Desktop/Assets/Brand/*-128.png" Link="Assets/Brand/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!-- This code-created app has no application PRI/XAML. Expose WinUI's
+       original control index under the unpackaged app's default resource name. -->
+  <Target Name="ExposeWinUIThemeResources" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetDir)Microsoft.UI.Xaml.Controls.pri" DestinationFiles="$(TargetDir)resources.pri" />
+  </Target>
+  <Target Name="PublishWinUIThemeResources" AfterTargets="Publish">
+    <Copy SourceFiles="$(PublishDir)Microsoft.UI.Xaml.Controls.pri" DestinationFiles="$(PublishDir)resources.pri" />
+  </Target>
+</Project>

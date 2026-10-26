@@ -623,7 +623,7 @@ class Peer:
                         if self.cohort: assert self.host == '127.0.0.2'
                         if self.mode == 'ptp-native-volume-change' and self.volume_reads == 2:
                             self.volume = 43
-                        await wire.response(headers, (f'volume: {self.mute_readback if self.mute_readback is not None else self.requested_volume_db if self.requested_volume_db < -30 else -30 + self.volume * .3:.6f}\r\n' if self.confirmed else 'volume: 0.000000\r\n').encode())
+                        await wire.response(headers, (f'volume: {self.mute_readback if self.mute_readback is not None else self.requested_volume_db if self.requested_volume_db < -30 or self.mode == "ptp-native-calibrated-exact" else -30 + self.volume * .3:.6f}\r\n' if self.confirmed else 'volume: 0.000000\r\n').encode())
                     else:
                         await wire.response(headers, b'volume: -24.000000\r\n' if self.confirmed else b'volume: 0.000000\r\n')
                 elif path == '/feedback':

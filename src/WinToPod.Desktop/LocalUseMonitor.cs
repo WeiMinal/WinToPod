@@ -41,18 +41,18 @@ internal sealed class LocalUseMonitor : IDisposable
         try { if (bytes < 2) return false; value = kind == 16 ? (ushort)Marshal.ReadInt16(buffer) : bytes >= 4 ? Marshal.ReadInt32(buffer) : -1; return value >= 0; }
         finally { WTSFreeMemory(buffer); }
     }
-    public void Process(ref Message message)
+    public void Process(int message, IntPtr wParam, IntPtr lParam)
     {
-        if (message.Msg == 0xFE) { _physical.Clear(); return; }
-        if (message.Msg == 0x2B1)
+        if (message == 0xFE) { _physical.Clear(); return; }
+        if (message == 0x2B1)
         {
-            if ((int)message.WParam is 2 or 3 or 4 or 6 or 7) { _locked = true; Intent?.Invoke(false); }
-            else if ((int)message.WParam is 1 or 8) { _locked = false; Intent?.Invoke(false); }
+            if ((int)wParam is 2 or 3 or 4 or 6 or 7) { _locked = true; Intent?.Invoke(false); }
+            else if ((int)wParam is 1 or 8) { _locked = false; Intent?.Invoke(false); }
             return;
         }
-        if (message.Msg != 0xFF || !Registered) return;
+        if (message != 0xFF || !Registered) return;
         var headerSize = (uint)Marshal.SizeOf<RawHeader>(); uint size = 128;
-        if (GetRawInputData(message.LParam, 0x10000003, _buffer, ref size, headerSize) == uint.MaxValue || size < headerSize + 12) return;
+        if (GetRawInputData(lParam, 0x10000003, _buffer, ref size, headerSize) == uint.MaxValue || size < headerSize + 12) return;
         var header = Marshal.PtrToStructure<RawHeader>(_buffer);
         var isAction = header.Type == 1 ? Marshal.ReadInt32(_buffer, (int)headerSize + 8) is 0x100 or 0x104 :
             header.Type == 0 && ((ushort)Marshal.ReadInt16(_buffer, (int)headerSize + 4) & 0x155) != 0;

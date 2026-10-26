@@ -27,3 +27,9 @@ playback-credentials.dat
 .pytest_cache/
 .DS_Store
 Thumbs.db
+
+*.exe
+*.dll
+*.obj
+*.res
+*.ilk

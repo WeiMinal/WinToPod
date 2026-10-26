@@ -22,6 +22,7 @@ if (args.FirstOrDefault() == "--test-native-pair")
         var addresses = new[] { System.Net.IPAddress.Parse("127.0.0.2"), System.Net.IPAddress.Parse("127.0.0.3") };
         var options = addresses.Select((remote, i) => new WinToPod.AirPlay.Media.AudioSessionOptions(remote, i == 0 ? leaderPort : secondaryPort,
             local, null, 20, addresses, new Dictionary<string, string?> { ["model"] = "AudioAccessory5,1", ["osvers"] = "27.0", ["tsid"] = "native-pair-test", ["flags"] = i == 0 ? "0xbac04" : "0xb8c84" }, new(31319, 31320), SenderIdentity: "CA58F410-91D9-4C29-A81E-998EC4B029C1")).ToArray();
+        if (mode.StartsWith("calibrated-", StringComparison.Ordinal)) options = options.Select(o => o with { VolumeCurve = WinToPod.AirPlay.Media.ReceiverVolumeCurve.DesktopCalibrated }).ToArray();
         if (mode == "password-supplied") options[1] = options[1] with { Password = "demo-secondary-secret" };
         if (mode == "password-both") options[0] = options[0] with { AdvertisedProperties = new Dictionary<string, string?>(options[0].AdvertisedProperties!) { ["flags"] = "0xbac84" } };
         if (mode is "password-live-only" or "no-password") options[1] = options[1] with { AdvertisedProperties = new Dictionary<string, string?>(options[1].AdvertisedProperties!) { ["flags"] = "0xb8c04" } };
@@ -47,6 +48,15 @@ if (args.FirstOrDefault() == "--test-native-pair")
                 return Task.FromResult<string?>(request.RemoteAddress.Equals(addresses[0]) ? "demo-primary-secret" : "demo-secondary-secret");
             }, pairingStore: pairings);
         playback = await Connect();
+        if (mode.StartsWith("calibrated-", StringComparison.Ordinal))
+        {
+            foreach (var percent in new[] { 1, 2, 5, 8, 10, 15, 16, 25, 35, 50, 75, 99, 100, 0, 2, 25, 50 })
+            {
+                if (!await playback.SetVolumeAndConfirmAsync(percent, timeout.Token) || await playback.ReadVolumeAsync(timeout.Token) != percent)
+                    throw new Exception($"Calibrated volume drift at {percent} percent.");
+            }
+            await playback.CloseAsync(true); Console.WriteLine("CALIBRATED_VOLUME_CONTROL_OK"); return 0;
+        }
         if (mode is "cache-reconnect" or "cache-verify-rejected")
         {
             await playback.RunAsync((memory, _) => { memory.Span.Fill(3); return ValueTask.CompletedTask; }, TimeSpan.FromSeconds(.35), timeout.Token);
@@ -268,6 +278,7 @@ checks.AddRange(AirPlayChecks.All());
 checks.AddRange(PrivacyChecks.All());
 checks.AddRange(DiscoveryChecks.All());
 checks.AddRange(SessionChecks.All());
+checks.AddRange(VolumeConfirmationChecks.All());
 checks.AddRange(PtpChecks.All());
 checks.Add(("PCM缓冲：下溢补静音、溢出丢最旧整帧、内存有界", () =>
 {

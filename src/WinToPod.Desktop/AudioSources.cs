@@ -34,12 +34,12 @@ internal sealed class LoopbackAudioSource : IDisposable
         _device = string.IsNullOrEmpty(endpointId) ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia) : enumerator.GetDevice(endpointId);
         try { if (startEndpoint) StartEndpoint(); } catch { _device.Dispose(); throw; }
     }
-    public static async Task<LoopbackAudioSource> OpenAsync(string? endpointId, CancellationToken cancellation)
+    public static async Task<LoopbackAudioSource> OpenAsync(string? endpointId, CancellationToken cancellation, bool requirePreMaster = false)
     {
         var source = new LoopbackAudioSource(endpointId, false);
         try
         {
-            if (endpointId is null && ProcessAudioCapture.Supported)
+            if ((endpointId is null || requirePreMaster) && ProcessAudioCapture.Supported)
             {
                 try
                 {
@@ -47,8 +47,9 @@ internal sealed class LoopbackAudioSource : IDisposable
                     source.CaptureMode = "application-mix-pre-master"; return source;
                 }
                 catch (Exception e) when (e is System.Runtime.InteropServices.COMException or IOException or TimeoutException or PlatformNotSupportedException)
-                { source.CaptureFallback = e is System.Runtime.InteropServices.COMException com ? $"COM 0x{com.HResult:X8}" : e.GetType().Name; source._error = null; source._buffer.Clear(); }
+                { if (requirePreMaster) throw new IOException("无法启动应用声音采集。为避免音量重复衰减，本次不会切换到输出设备回环采集。", e); source.CaptureFallback = e is System.Runtime.InteropServices.COMException com ? $"COM 0x{com.HResult:X8}" : e.GetType().Name; source._error = null; source._buffer.Clear(); }
             }
+            if (requirePreMaster) throw new PlatformNotSupportedException("应用声音采集需要 Windows 11 或 Windows build 20348 及以上。请更新系统后重试。");
             source.StartEndpoint(); return source;
         }
         catch { source.Dispose(); throw; }

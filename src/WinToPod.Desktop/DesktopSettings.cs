@@ -5,6 +5,8 @@ using WinToPod.Core;
 
 namespace WinToPod.Desktop;
 
+internal enum ApplicationAppearance { System, Light, Dark }
+
 internal sealed record DesktopSettings
 {
     [System.Text.Json.Serialization.JsonRequired]
@@ -16,11 +18,13 @@ internal sealed record DesktopSettings
     public bool AutoConnectOnStart { get; set; } = true;
     public string SenderIdentity { get; init; } = Guid.NewGuid().ToString("D").ToUpperInvariant();
     public Dictionary<string, DateTimeOffset> ReceiverRetryAfter { get; init; } = new(StringComparer.Ordinal);
+    public HashSet<string> WinUiPreMasterTargets { get; init; } = new(StringComparer.Ordinal);
     public HashSet<string> SingleFallbackTargets { get; init; } = new(StringComparer.Ordinal);
     [System.Text.Json.Serialization.JsonRequired]
     public Dictionary<string, int> Volumes { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, int> UnmutedVolumes { get; init; } = new(StringComparer.Ordinal);
     public bool HideOnClose { get; set; }
+    public ApplicationAppearance WinUiAppearance { get; set; } = ApplicationAppearance.System;
     public string? CaptureEndpointId { get; set; }
     [System.Text.Json.Serialization.JsonRequired]
     public bool Interrupted { get; set; }
@@ -37,9 +41,10 @@ internal sealed record DesktopSettings
         try
         {
             var settings = JsonSerializer.Deserialize<DesktopSettings>(File.ReadAllText(FilePath)) ?? throw new InvalidDataException();
-            if (!Enum.IsDefined(settings.Policy) || settings.LastConnectedMembers is null || settings.LastConnectedMembers.Length > 2 || settings.LastConnectedMembers.Any(string.IsNullOrWhiteSpace) ||
+            if (!Enum.IsDefined(settings.Policy) || !Enum.IsDefined(settings.WinUiAppearance) || settings.LastConnectedMembers is null || settings.LastConnectedMembers.Length > 2 || settings.LastConnectedMembers.Any(string.IsNullOrWhiteSpace) ||
                 settings.LastConnectedReceiver is { } target && (target.Length > 4096 || string.IsNullOrWhiteSpace(target) || target.Any(char.IsControl)) ||
                 settings.ReceiverRetryAfter is null || settings.ReceiverRetryAfter.Count > 1024 || settings.ReceiverRetryAfter.Keys.Any(string.IsNullOrWhiteSpace) || settings.Schema != 1 || !Guid.TryParse(settings.SenderIdentity, out _) || settings.SingleFallbackTargets is null ||
+                settings.WinUiPreMasterTargets is null || settings.WinUiPreMasterTargets.Count > 1024 || settings.WinUiPreMasterTargets.Any(string.IsNullOrWhiteSpace) ||
                 settings.SingleFallbackTargets.Count > 1024 || settings.SingleFallbackTargets.Any(string.IsNullOrWhiteSpace) || settings.Volumes is null || settings.Volumes.Count > 1024 ||
                 settings.UnmutedVolumes is null || settings.UnmutedVolumes.Count > 1024 || settings.UnmutedVolumes.Any(p => string.IsNullOrWhiteSpace(p.Key) || p.Value is < 1 or > 100) ||
                 settings.Volumes.Any(p => string.IsNullOrWhiteSpace(p.Key) || p.Value is < 0 or > 100) ||
@@ -69,10 +74,10 @@ internal sealed record DesktopSettings
     private const string RunPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     public static bool StartsAtLogin()
     { using var key = Registry.CurrentUser.OpenSubKey(RunPath); return key?.GetValue("WinToPod") is string; }
-    public static void SetStartAtLogin(bool enabled)
+    public static void SetStartAtLogin(bool enabled, string? executablePath = null)
     {
         using var key = Registry.CurrentUser.CreateSubKey(RunPath, true) ?? throw new IOException("无法打开当前用户登录启动设置。");
-        if (enabled) key.SetValue("WinToPod", "\"" + Application.ExecutablePath + "\" --startup", RegistryValueKind.String);
+        if (enabled) key.SetValue("WinToPod", "\"" + (executablePath ?? Environment.ProcessPath ?? throw new IOException("无法确定程序路径。")) + "\" --startup", RegistryValueKind.String);
         else key.DeleteValue("WinToPod", false);
     }
 }

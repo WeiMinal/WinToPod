@@ -9,6 +9,6 @@ AirPlay 2 缺少可供本项目直接遵循的完整官方公开发送端规范�
 - [Microsoft ApplicationLoopback](https://learn.microsoft.com/en-us/samples/microsoft/windows-classic-samples/applicationloopback/)：Windows 进程树采集接口。
 - [Microsoft ActivateAudioInterfaceAsync](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-activateaudiointerfaceasync)：原生激活与回调生存期要求。
 
-`AirPlay/999.0.0` 是当前互操作请求配置中的 User-Agent，不是产品版本；产品版本单独记录为 V1.0。静态协议配置不应为了改版本号而随意更换，兼容变更需要接收端回归。
+`AirPlay/999.0.0` 是当前互操作请求配置中的 User-Agent，不是产品版本；产品版本单独记录为 V1.1。静态协议配置不应为了改版本号而随意更换，兼容变更需要接收端回归。
 
 尚未完成完整 PTP 伺服、多组独立目标同步、所有接收端访问策略与所有固件互操作。不要把握手/准备成功等同实际可听，也不要把控制通道 EOF 直接认作被 Apple TV 接管。

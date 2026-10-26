@@ -35,6 +35,8 @@ public sealed class NativePlaybackSession : IAsyncDisposable
             throw new IOException("组合成员地址重复或不在同一网络接口，已停止连接。");
         if (members.Select(m => m.SenderIdentity).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1)
             throw new ArgumentException("组合成员必须使用同一发送端身份。", nameof(members));
+        if (members.Select(m => m.VolumeCurve).Distinct().Count() != 1)
+            throw new ArgumentException("组合成员必须使用同一音量映射。", nameof(members));
         using var memory = pairingStore is null ? new MemoryReceiverPairingStore() : null;
         var store = pairingStore ?? memory!;
         var cohort = members.Count == 2 ? new PlaybackCohort(members) : null;

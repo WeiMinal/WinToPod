@@ -53,6 +53,8 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
     private double? _muteReadbackDb;
     private Exception? _backgroundFailure;
     private long _packetCount, _resendCount;
+    private readonly SendScheduleDiagnostics _sendSchedule = new();
+    public SendScheduleSnapshot SendSchedule => _sendSchedule.Snapshot;
     public long PacketsSent => Interlocked.Read(ref _packetCount);
     public long Retransmits => Interlocked.Read(ref _resendCount);
     public int? LastConfirmedVolume { get; private set; }
@@ -356,6 +358,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
         _latency = members.Max(m => m.Latency);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, cancellation, _cohort?.Cancellation ?? CancellationToken.None);
         var pcm = new byte[352 * 4]; var start = Stopwatch.GetTimestamp(); long frames = 0; var first = true; var nextSync = TimeSpan.Zero;
+        var nextReport = TimeSpan.FromSeconds(30);
         var initialTimestamp = _timestamp;
         var anchor = _ptp?.Read();
         try
@@ -397,6 +400,11 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
                 }
                 _timestamp = unchecked(_timestamp + 352); frames += 352; first = false;
                 var deadline = TimeSpan.FromSeconds(frames / 44100d); var remaining = deadline - Stopwatch.GetElapsedTime(start);
+                _sendSchedule.Observe(remaining);
+                if (elapsed >= nextReport)
+                {
+                    ReportSendSchedule("发送状态"); nextReport = elapsed + TimeSpan.FromSeconds(30);
+                }
                 if (remaining > TimeSpan.Zero) await Task.Delay(remaining, linked.Token).ConfigureAwait(false);
                 else if (remaining < TimeSpan.FromSeconds(-0.5)) throw new IOException("发送线程落后超过500ms，已停止，避免持续堆积延迟。");
             }
@@ -405,8 +413,11 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
         catch (OperationCanceledException) when (_backgroundFailure is not null || _cohort?.Failure is not null)
         { throw _backgroundFailure ?? _cohort?.Failure ?? new IOException("音箱会话已中断。"); }
         catch (Exception e) when (e is not OperationCanceledException) { Fail(e); throw; }
-        finally { CryptographicOperations.ZeroMemory(pcm); }
+        finally { CryptographicOperations.ZeroMemory(pcm); ReportSendSchedule("发送结束"); }
     }
+
+    private void ReportSendSchedule(string label)
+        => _diagnostic?.Invoke($"{label}：" + _sendSchedule.Snapshot.DiagnosticFields + $"；协商缓冲样本={_latency}；已发包={PacketsSent}。");
 
     private async Task<Dictionary<string, object?>> PlistAsync(string method, Dictionary<string, object?> body, CancellationToken cancellation)
     {

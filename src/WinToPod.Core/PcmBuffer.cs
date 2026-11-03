@@ -11,6 +11,8 @@ public sealed class PcmBuffer
     public long DroppedFrames { get { lock (_gate) return _dropped; } }
     public long MissingFrames { get { lock (_gate) return _missing; } }
     public int AvailableBytes { get { lock (_gate) return _count; } }
+    public PcmBufferSnapshot Snapshot
+    { get { lock (_gate) return new(_dropped, _missing, _count / 4, _buffer.Length / 4); } }
     public void Write(ReadOnlySpan<byte> source)
     {
         if (source.Length % 4 != 0) throw new ArgumentException("Whole stereo frames required.");

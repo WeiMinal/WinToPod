@@ -14,6 +14,38 @@ public sealed class PtpClockTracker(ulong ownClockId, bool followReceiver)
     private ushort _sourcePort;
     private long _offset, _first, _last;
     private int _samples;
+    private readonly long[] _intervals = new long[6];
+    private long _lastArrival, _maxInterval, _rejectedOffsets, _maxOffsetJump, _resets, _gapResets, _readinessLosses, _maxSampleInterval;
+    private bool _hasArrival, _diagnosticReady;
+
+    private void RecordArrival(long received)
+    {
+        // Two UDP receive workers can acquire the lock in reverse timestamp order.
+        // Do not turn a negative interval into a large unsigned diagnostic value.
+        if (_hasArrival && received >= _lastArrival)
+        {
+            var gap = received - _lastArrival;
+            var bucket = gap <= 150_000_000 ? 0 : gap <= 250_000_000 ? 1 : gap <= 500_000_000 ? 2 :
+                gap <= 1_000_000_000 ? 3 : gap <= 2_000_000_000 ? 4 : 5;
+            _intervals[bucket]++; _maxInterval = Math.Max(_maxInterval, gap);
+        }
+        if (!_hasArrival || received > _lastArrival) _lastArrival = received;
+        _hasArrival = true;
+    }
+    private void RecordReady(bool ready)
+    { if (_diagnosticReady && !ready) _readinessLosses++; _diagnosticReady = ready; }
+    private void RecordReset()
+    { if (_samples > 0) _resets++; RecordReady(false); }
+    public PtpClockDiagnostics Diagnostics(long localNanoseconds)
+    {
+        lock (_gate)
+        {
+            RecordReady(State(localNanoseconds).Ready);
+            return new(_intervals[0], _intervals[1], _intervals[2], _intervals[3], _intervals[4], _intervals[5],
+                _maxInterval, _rejectedOffsets, _maxOffsetJump, _resets, _gapResets, _readinessLosses,
+                _maxSampleInterval, _samples == 0 ? -1 : localNanoseconds - _last, _samples == 0 ? 0 : _last - _first);
+        }
+    }
     public bool FollowReceiver => followReceiver;
     public void Observe(ReadOnlySpan<byte> packet, long receivedNanoseconds)
     {
@@ -25,6 +57,7 @@ public sealed class PtpClockTracker(ulong ownClockId, bool followReceiver)
             if (source == ownClockId) return;
             if (!followReceiver)
             {
+                RecordArrival(receivedNanoseconds);
                 if (type is 1 or 2)
                 {
                     var key = (source, BinaryPrimitives.ReadUInt16BigEndian(packet[28..]), type);
@@ -41,9 +74,10 @@ public sealed class PtpClockTracker(ulong ownClockId, bool followReceiver)
                 if (master == 0 || master == ownClockId) return;
                 var port = BinaryPrimitives.ReadUInt16BigEndian(packet[28..]);
                 if (_master != master || _source != source || _sourcePort != port)
-                { _master = master; _source = source; _sourcePort = port; _samples = 0; _pending.Clear(); }
+                { RecordReset(); _master = master; _source = source; _sourcePort = port; _samples = 0; _pending.Clear(); }
             }
             if (_source != source || BinaryPrimitives.ReadUInt16BigEndian(packet[28..]) != _sourcePort || _master == 0) return;
+            RecordArrival(receivedNanoseconds);
             var sequence = BinaryPrimitives.ReadUInt16BigEndian(packet[30..]);
             var correction = BinaryPrimitives.ReadInt64BigEndian(packet[8..]) / 65536;
             if (type == 0 && (packet[6] & 2) != 0)
@@ -65,25 +99,37 @@ public sealed class PtpClockTracker(ulong ownClockId, bool followReceiver)
         // A change in epoch/master or a discontinuity invalidates readiness.
         // It must never silently move an already announced audio timeline.
         var delta = offset - _offset;
-        if (_samples >= 8 && Int128.Abs(delta) > 5_000_000) return;
+        RecordReady(State(received).Ready);
+        if (_samples > 0) _maxOffsetJump = Math.Max(_maxOffsetJump, (long)Int128.Min(long.MaxValue, Int128.Abs(delta)));
+        if (_samples >= 8 && Int128.Abs(delta) > 5_000_000) { _rejectedOffsets++; return; }
         if (_samples == 0 || Int128.Abs(delta) > 5_000_000)
-        { _offset = (long)offset; _samples = 0; }
+        { RecordReset(); _offset = (long)offset; _samples = 0; }
         else _offset = (long)((Int128)_offset + delta / 8);
         Count(received);
     }
     private void Count(long received)
     {
-        if (_samples == 0 || received <= _last || received - _last > 1_000_000_000) { _first = received; _samples = 0; }
+        if (_samples > 0)
+        {
+            _maxSampleInterval = Math.Max(_maxSampleInterval, received - _last);
+            if (received - _last > 1_000_000_000) _gapResets++;
+        }
+        if (_samples == 0 || received <= _last || received - _last > 1_000_000_000) { RecordReset(); _first = received; _samples = 0; }
         _last = received; _samples++;
+        RecordReady(State(received).Ready);
     }
     public (bool Ready, int Samples, ulong ClockId, long TimeNanoseconds) Snapshot(long localNanoseconds)
     {
         lock (_gate)
         {
-            var fresh = _samples >= 8 && localNanoseconds >= _last && localNanoseconds - _last < 2_000_000_000 && _last - _first >= 2_300_000_000;
-            var time = (Int128)localNanoseconds + (followReceiver ? _offset : 0);
-            return (fresh && time >= 0 && time <= long.MaxValue, _samples, followReceiver ? _master : ownClockId,
-                time >= 0 && time <= long.MaxValue ? (long)time : 0);
+            var state = State(localNanoseconds); RecordReady(state.Ready); return state;
         }
+    }
+    private (bool Ready, int Samples, ulong ClockId, long TimeNanoseconds) State(long localNanoseconds)
+    {
+        var fresh = _samples >= 8 && localNanoseconds >= _last && localNanoseconds - _last < 2_000_000_000 && _last - _first >= 2_300_000_000;
+        var time = (Int128)localNanoseconds + (followReceiver ? _offset : 0);
+        return (fresh && time >= 0 && time <= long.MaxValue, _samples, followReceiver ? _master : ownClockId,
+            time >= 0 && time <= long.MaxValue ? (long)time : 0);
     }
 }

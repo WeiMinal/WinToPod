@@ -53,6 +53,7 @@ public sealed class PtpClockEngine : IAsyncDisposable
         try { socket.ExclusiveAddressUse = true; socket.Client.Bind(new IPEndPoint(local, port)); return socket; }
         catch { socket.Dispose(); throw; }
     }
+    public PtpClockDiagnostics Diagnostics => _tracker.Diagnostics(_clock.UnixNanoseconds);
     public (ulong ClockId, long TimeNanoseconds) Read()
     {
         var state = _tracker.Snapshot(_clock.UnixNanoseconds);
@@ -143,13 +144,21 @@ public sealed class PtpClockEngine : IAsyncDisposable
         if (_lastReport != 0 && Stopwatch.GetElapsedTime(_lastReport, now) < TimeSpan.FromSeconds(30) && !_stop.IsCancellationRequested) return;
         _lastReport = now;
         var state = _tracker.Snapshot(_clock.UnixNanoseconds);
-        _diagnostic?.Invoke($"PTP状态：tx={Interlocked.Read(ref _sent)}；rx={Interlocked.Read(ref _received)}；delayRequests={Interlocked.Read(ref _probes)}；syncs={Interlocked.Read(ref _syncs)}；samples={state.Samples}；ready={state.Ready}。");
+        _diagnostic?.Invoke($"PTP状态：tx={Interlocked.Read(ref _sent)}；rx={Interlocked.Read(ref _received)}；delayRequests={Interlocked.Read(ref _probes)}；syncs={Interlocked.Read(ref _syncs)}；samples={state.Samples}；ready={state.Ready}。" + _tracker.Diagnostics(_clock.UnixNanoseconds).DiagnosticFields);
+        var index = 0;
+        foreach (var tracker in _required.Values)
+        {
+            index++;
+            if (ReferenceEquals(tracker, _tracker)) continue;
+            var nowNs = _clock.UnixNanoseconds; var member = tracker.Snapshot(nowNs);
+            _diagnostic?.Invoke($"PTP成员状态：序号={index}；samples={member.Samples}；ready={member.Ready}。" + tracker.Diagnostics(nowNs).DiagnosticFields);
+        }
     }
     private void Fail(Exception error)
     {
         if (_stop.IsCancellationRequested || Interlocked.CompareExchange(ref _failure, error, null) is not null) return;
         var failure = new SessionInterruption("clock", error); _diagnostic?.Invoke(failure.SafeDiagnostic);
-        _stop.Cancel(); _failed(failure);
+        _stop.Cancel(); Report(); _failed(failure);
     }
     public async ValueTask DisposeAsync()
     { await _stop.CancelAsync().ConfigureAwait(false); await Task.WhenAll(_workers).ConfigureAwait(false); Report(); _events.Dispose(); _general.Dispose(); _stop.Dispose(); }

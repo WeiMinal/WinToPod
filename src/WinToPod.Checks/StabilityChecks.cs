@@ -51,7 +51,7 @@ internal static class StabilityChecks
             if (playback is not null)
                 try { await playback.SetVolumeAndConfirmAsync(80, stop.Token); throw new Exception("Control after interruption."); } catch (IOException) { }
         }
-        finally { if (playback is not null) await playback.CloseAsync(mode is not ("event-eof" or "bad-event-tag" or "oversized-event")); }
+        finally { if (playback is not null) await playback.CloseAsync(mode is not ("event-eof" or "bad-event-tag" or "oversized-event")); Base01Diagnostics.Write(trace); }
         if (mode is not ("cached-reconnect" or "forget-reconnect" or "expired-cache") && !prompts.SequenceEqual(new[] { false })) throw new Exception("Unexpected extra password.");
         var text = string.Join('\n', trace);
         if (new[] { "demo-secondary-secret", "never-log-event-content", "never-log-digest-nonce", "never-log-opaque" }.Any(text.Contains)) throw new Exception("Secret or event content logged.");

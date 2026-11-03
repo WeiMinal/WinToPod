@@ -53,6 +53,7 @@ async def main():
             process = await asyncio.create_subprocess_exec(dotnet, assembly, '--test-native-pair', *map(str, ports), mode,
                                                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             out, err = await asyncio.wait_for(process.communicate(), 35)
+            if err: print(err.decode(), file=sys.stderr, end="")
             assert process.returncode == 0, (mode, out.decode(), err.decode())
             assert all(not p.errors for p in peers), (mode, [p.errors for p in peers])
             primary, secondary = peers

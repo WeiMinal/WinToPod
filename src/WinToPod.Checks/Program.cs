@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text.Json;
 using WinToPod.Core;
+if (args.FirstOrDefault() == "--base01-drift") return await Base01Drift.RunAsync();
 if (args.FirstOrDefault() == "--test-automatic-connection") return AutomaticConnectionChecks.Run();
 
 if (args.FirstOrDefault() == "--test-digest") return await DigestChecks.Run(args);
@@ -155,6 +156,7 @@ if (args.FirstOrDefault() == "--test-native-pair")
         if (passwordPromptCalls != expectedPrompts) throw new Exception($"Unexpected password prompt count: {passwordPromptCalls}, expected {expectedPrompts}.");
         if (mode == "bad-m6-signature" && pairings.SavedCount != 0) throw new Exception("Unauthenticated pairing was saved.");
         if (mode is "cache-reconnect" or "cache-verify-rejected" && pairings.SavedCount != 1) throw new Exception("Pairing was not retained for reconnection.");
+        Base01Diagnostics.Write(diagnostics);
         var trace = string.Join('\n', diagnostics);
         if (new[] { "demo-primary-secret", "demo-secondary-secret", "wrong-pair-secret" }.Any(trace.Contains)) throw new Exception("Password leaked into diagnostics.");
     }
@@ -218,7 +220,7 @@ if (args.FirstOrDefault() == "--test-session")
     catch (IOException) when (args[2] == "ptp-volume-reject") { Console.WriteLine("PTP_VOLUME_REJECTED_NO_AUDIO"); return 0; }
     catch (WinToPod.AirPlay.Transport.RtspRejectedException e) when (args[2] == "ptp-reject-peers" && e.Stage == "设置时钟节点") { Console.WriteLine("PTP_PEERS_REJECTED_NO_AUDIO"); return 0; }
     catch (IOException e) when (args[2] == "ptp-port-busy" && e.Message.Contains("PTP时钟端口")) { Console.WriteLine("PTP_PORT_BUSY_NO_FALLBACK"); return 0; }
-    finally { if (session is not null) await session.DisposeAsync(); }
+    finally { if (session is not null) await session.DisposeAsync(); Base01Diagnostics.Write(protocolDiagnostics); }
 }
 
 var checks = new List<(string Name, Func<Task> Run)>();
@@ -280,6 +282,7 @@ checks.AddRange(DiscoveryChecks.All());
 checks.AddRange(SessionChecks.All());
 checks.AddRange(VolumeConfirmationChecks.All());
 checks.AddRange(PtpChecks.All());
+checks.AddRange(Base01Checks.All());
 checks.Add(("PCM缓冲：下溢补静音、溢出丢最旧整帧、内存有界", () =>
 {
     var buffer = new PcmBuffer(1408); var data = Enumerable.Range(0, 1408).Select(i => (byte)i).ToArray();

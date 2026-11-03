@@ -671,6 +671,7 @@ async def main():
             child = await asyncio.create_subprocess_exec(dotnet, assembly, '--test-session', str(port), mode, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             stdout, stderr = await asyncio.wait_for(child.communicate(), 25)
             await asyncio.sleep(0.1)
+            if stderr: print(stderr.decode(), file=sys.stderr, end="")
             assert child.returncode == 0, (mode, stdout.decode(), stderr.decode(), peer.errors)
             assert not peer.errors, peer.errors
             if mode in ['ptp-pair', 'ptp-single']:

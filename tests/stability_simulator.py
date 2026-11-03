@@ -22,6 +22,7 @@ async def main():
             ports=[await p.start() for p in peers]
             process=await asyncio.create_subprocess_exec(dotnet,assembly,'--test-stability',*map(str,ports),mode,str(seconds),stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
             out,err=await asyncio.wait_for(process.communicate(),seconds+45)
+            if err: print(err.decode(), file=sys.stderr, end="")
             assert process.returncode==0,(mode,out.decode(),err.decode(),[p.errors for p in peers])
             assert all(not p.errors for p in peers),(mode,[p.errors for p in peers])
             assert len(primary.event_secret)==64 and len(secondary.event_secret)==32,'Events used wrong secret length'

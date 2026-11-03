@@ -53,7 +53,7 @@ internal static class DigestChecks
         {
             try { await playback!.SetVolumeAndConfirmAsync(80, stop.Token); throw new Exception("Control after loss."); } catch (IOException) { }
         }
-        finally { if (playback is not null) await playback.DisposeAsync(); }
+        finally { if (playback is not null) await playback.DisposeAsync(); Base01Diagnostics.Write(traces); }
         var expected = mode == "cache-reconnect" ? 2 : 1;
         if (prompts.Count != expected) throw new Exception("Playback challenge repeated a password prompt.");
         if (mode != "cache-reconnect" && prompts[0] != (mode is "single-transient" or "cancel-playback")) throw new Exception("Wrong password phase.");

@@ -37,6 +37,7 @@ async def main():
             process = await asyncio.create_subprocess_exec(dotnet, assembly, '--test-digest', *map(str, ports), mode,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             out, err = await asyncio.wait_for(process.communicate(), 35)
+            if err: print(err.decode(), file=sys.stderr, end="")
             assert process.returncode == 0, (mode, out.decode(), err.decode(), [p.errors for p in peers])
             assert all(not p.errors for p in peers), (mode, [p.errors for p in peers])
             assert secondary.digest_challenges == (2 if mode == 'cache-reconnect' else 1), 'Repeated Digest challenge or new connection after refusal'

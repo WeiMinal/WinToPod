@@ -8,7 +8,11 @@ public sealed class NetworkClock
 {
     private readonly long _start = Stopwatch.GetTimestamp();
     private readonly DateTimeOffset _utc = DateTimeOffset.UtcNow;
-    public DateTimeOffset Now => _utc + Stopwatch.GetElapsedTime(_start);
+    private readonly MediaTimeSource _time = MediaTimeSource.System;
+    public NetworkClock() { }
+    internal NetworkClock(MediaTimeSource time)
+    { _time = time; _start = time.GetTimestamp(); _utc = time.UtcNow; }
+    public DateTimeOffset Now => _utc + _time.GetElapsedTime(_start);
     public ulong NtpNow => ToNtp(Now);
     public long UnixNanoseconds => checked((Now - DateTimeOffset.UnixEpoch).Ticks * 100);
     public static ulong ToNtp(DateTimeOffset utc)

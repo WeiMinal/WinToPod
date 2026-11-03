@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Buffers.Binary;
-using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 
@@ -18,6 +17,7 @@ public sealed class PtpClockEngine : IAsyncDisposable
     private readonly PtpClockTracker _tracker;
     private readonly Dictionary<IPAddress, PtpClockTracker> _required = [];
     private readonly NetworkClock _clock = new();
+    private readonly MediaTimeSource _time = MediaTimeSource.System;
     private readonly CancellationTokenSource _stop = new();
     private readonly Action<string>? _diagnostic;
     private readonly Action<Exception> _failed;
@@ -30,7 +30,13 @@ public sealed class PtpClockEngine : IAsyncDisposable
     public PtpClockEngine(IPAddress local, IPAddress primary, IEnumerable<IPAddress> peers, ulong clockId,
         bool followReceiver, Action<string>? diagnostic, Action<Exception> failed, PtpTestPorts? testPorts = null,
         IEnumerable<IPAddress>? requiredPeers = null)
+        : this(null, local, primary, peers, clockId, followReceiver, diagnostic, failed, testPorts, requiredPeers) { }
+
+    internal PtpClockEngine(MediaTimeSource? timeSource, IPAddress local, IPAddress primary, IEnumerable<IPAddress> peers, ulong clockId,
+        bool followReceiver, Action<string>? diagnostic, Action<Exception> failed, PtpTestPorts? testPorts = null,
+        IEnumerable<IPAddress>? requiredPeers = null)
     {
+        if (timeSource is not null) { _time = timeSource; _clock = new(timeSource); }
         _primary = primary; _peers = peers.Append(primary).Where(x => !x.Equals(local)).Distinct().Take(8).ToArray();
         _clockId = clockId; _tracker = new(clockId, followReceiver); _diagnostic = diagnostic; _failed = failed;
         foreach (var peer in requiredPeers ?? [])
@@ -67,14 +73,14 @@ public sealed class PtpClockEngine : IAsyncDisposable
     }
     public async Task WaitUntilReadyAsync(CancellationToken cancellation)
     {
-        var started = Stopwatch.GetTimestamp();
-        while (Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(9))
+        var started = _time.GetTimestamp();
+        while (_time.GetElapsedTime(started) < TimeSpan.FromSeconds(9))
         {
             cancellation.ThrowIfCancellationRequested();
             if (_failure is not null) throw new IOException("PTP时钟通道失败。", _failure);
             var state = _tracker.Snapshot(_clock.UnixNanoseconds);
             if (state.Ready && _required.Values.All(t => t.Snapshot(_clock.UnixNanoseconds).Ready)) { _wasReady = true; _diagnostic?.Invoke($"PTP时钟就绪：samples={state.Samples}；全部成员就绪；尚未发送音频。"); return; }
-            await Task.Delay(100, cancellation).ConfigureAwait(false);
+            await _time.DelayAsync(TimeSpan.FromMilliseconds(100), cancellation).ConfigureAwait(false);
         }
         Report(); throw new IOException("PTP时钟尚未同步，已停止连接且未发送音频。请导出诊断查看时钟收发情况。");
     }
@@ -112,7 +118,7 @@ public sealed class PtpClockEngine : IAsyncDisposable
     {
         try
         {
-            ushort sequence = 0, announce = 0; var next = Stopwatch.GetTimestamp(); var ticks = 0;
+            ushort sequence = 0, announce = 0; var next = _time.GetTimestamp(); var ticks = 0;
             while (!_stop.IsCancellationRequested)
             {
                 if (!_tracker.FollowReceiver)
@@ -127,10 +133,10 @@ public sealed class PtpClockEngine : IAsyncDisposable
                 if (_wasReady && (!_tracker.Snapshot(_clock.UnixNanoseconds).Ready || _required.Values.Any(t => !t.Snapshot(_clock.UnixNanoseconds).Ready))) throw new IOException("PTP时钟数据中断或时间线变化。");
                 if (ticks % 8 == 0) { announce++; Report(); }
                 sequence++; ticks++;
-                next += Stopwatch.Frequency / 8;
-                var delay = TimeSpan.FromSeconds((next - Stopwatch.GetTimestamp()) / (double)Stopwatch.Frequency);
-                if (delay > TimeSpan.Zero) await Task.Delay(delay, _stop.Token).ConfigureAwait(false);
-                else next = Stopwatch.GetTimestamp();
+                next += _time.Frequency / 8;
+                var delay = TimeSpan.FromSeconds((next - _time.GetTimestamp()) / (double)_time.Frequency);
+                if (delay > TimeSpan.Zero) await _time.DelayAsync(delay, _stop.Token).ConfigureAwait(false);
+                else next = _time.GetTimestamp();
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
@@ -140,8 +146,8 @@ public sealed class PtpClockEngine : IAsyncDisposable
     { await socket.SendAsync(payload, new IPEndPoint(address, port), _stop.Token).ConfigureAwait(false); Interlocked.Increment(ref _sent); }
     private void Report()
     {
-        var now = Stopwatch.GetTimestamp();
-        if (_lastReport != 0 && Stopwatch.GetElapsedTime(_lastReport, now) < TimeSpan.FromSeconds(30) && !_stop.IsCancellationRequested) return;
+        var now = _time.GetTimestamp();
+        if (_lastReport != 0 && _time.GetElapsedTime(_lastReport, now) < TimeSpan.FromSeconds(30) && !_stop.IsCancellationRequested) return;
         _lastReport = now;
         var state = _tracker.Snapshot(_clock.UnixNanoseconds);
         _diagnostic?.Invoke($"PTP状态：tx={Interlocked.Read(ref _sent)}；rx={Interlocked.Read(ref _received)}；delayRequests={Interlocked.Read(ref _probes)}；syncs={Interlocked.Read(ref _syncs)}；samples={state.Samples}；ready={state.Ready}。" + _tracker.Diagnostics(_clock.UnixNanoseconds).DiagnosticFields);

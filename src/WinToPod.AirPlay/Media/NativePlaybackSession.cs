@@ -153,7 +153,7 @@ internal sealed class PlaybackCohort : IAsyncDisposable
     { _members = members.ToArray(); _leader = _members[0]; Identity[0] = (byte)((Identity[0] | 2) & 0xfe); }
     public bool IsLeader(AudioSessionOptions options) => options.RemoteAddress.Equals(_leader.RemoteAddress);
     public PtpClockEngine GetClock(Action<string>? diagnostic)
-        => _clock ??= new(_leader.LocalAddress, _leader.RemoteAddress, _members.Select(m => m.RemoteAddress),
+        => _clock ??= new(_leader.TimeSource, _leader.LocalAddress, _leader.RemoteAddress, _members.Select(m => m.RemoteAddress),
             BinaryPrimitives.ReadUInt64BigEndian(Identity), false, diagnostic, Fail, _leader.LoopbackTestPorts,
             _members.Select(m => m.RemoteAddress));
     public void Fail(Exception error)

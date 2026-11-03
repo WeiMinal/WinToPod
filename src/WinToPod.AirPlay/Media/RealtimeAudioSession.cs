@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Buffers.Binary;
-using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -16,7 +15,10 @@ namespace WinToPod.AirPlay.Media;
 public sealed record AudioSessionOptions(IPAddress RemoteAddress, int Port, IPAddress LocalAddress,
     string? Password, int Volume, IPAddress[]? TimingPeers = null, IReadOnlyDictionary<string, string?>? AdvertisedProperties = null,
     PtpTestPorts? LoopbackTestPorts = null, string? SenderIdentity = null, string? ReceiverId = null,
-    ReceiverVolumeCurve VolumeCurve = ReceiverVolumeCurve.Native);
+    ReceiverVolumeCurve VolumeCurve = ReceiverVolumeCurve.Native)
+{
+    internal MediaTimeSource? TimeSource { get; init; }
+}
 
 // Only the independent loopback harness may relocate privileged UDP ports.
 // Desktop calls never set this; actual AirPlay always uses 319 and 320.
@@ -30,6 +32,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
     private readonly AudioSessionOptions _options;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly NetworkClock _clock = new();
+    private readonly MediaTimeSource _time = MediaTimeSource.System;
     private readonly UdpClient _timing, _control, _data;
     private readonly object _packetsLock = new();
     private readonly Dictionary<ushort, byte[]> _recent = [];
@@ -63,6 +66,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
     private RealtimeAudioSession(RtspConnection rtsp, AudioSessionOptions options, Action<string>? diagnostic, PlaybackCohort? cohort)
     {
         _rtsp = rtsp; _options = options; _diagnostic = diagnostic; _cohort = cohort;
+        if (options.TimeSource is { } time) { _time = time; _clock = new(time); }
         _timing = Bound(options.LocalAddress); _control = Bound(options.LocalAddress); _data = Bound(options.LocalAddress);
     }
 
@@ -191,7 +195,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
             if (usePtp)
             {
                 progress?.Invoke("正在准备音箱同步时钟");
-                _ptp = _cohort is null ? new(_options.LocalAddress, _options.RemoteAddress, _options.TimingPeers ?? [], clockId, follow, _diagnostic, Fail, _options.LoopbackTestPorts) : _cohort.GetClock(_diagnostic);
+                _ptp = _cohort is null ? new(_options.TimeSource, _options.LocalAddress, _options.RemoteAddress, _options.TimingPeers ?? [], clockId, follow, _diagnostic, Fail, _options.LoopbackTestPorts) : _cohort.GetClock(_diagnostic);
             }
             else if (_cohort is not null) throw new IOException("组合成员没有提供PTP能力，已停止整组连接。");
             else _background.Add(TimingLoopAsync());
@@ -357,7 +361,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
         }
         _latency = members.Max(m => m.Latency);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, cancellation, _cohort?.Cancellation ?? CancellationToken.None);
-        var pcm = new byte[352 * 4]; var start = Stopwatch.GetTimestamp(); long frames = 0; var first = true; var nextSync = TimeSpan.Zero;
+        var pcm = new byte[352 * 4]; var start = _time.GetTimestamp(); long frames = 0; var first = true; var nextSync = TimeSpan.Zero;
         var nextReport = TimeSpan.FromSeconds(30);
         var initialTimestamp = _timestamp;
         var anchor = _ptp?.Read();
@@ -365,7 +369,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
         {
             while (!linked.IsCancellationRequested)
             {
-                var elapsed = Stopwatch.GetElapsedTime(start);
+                var elapsed = _time.GetElapsedTime(start);
                 if (duration is { } limit && elapsed >= limit + TimeSpan.FromSeconds(_latency / 44100d + 0.3)) return;
                 pcm.AsSpan().Clear();
                 if (duration is null || elapsed < duration) await readPcm(pcm, linked.Token).ConfigureAwait(false);
@@ -399,13 +403,13 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
                     Interlocked.Increment(ref member._packetCount); member._sequence++;
                 }
                 _timestamp = unchecked(_timestamp + 352); frames += 352; first = false;
-                var deadline = TimeSpan.FromSeconds(frames / 44100d); var remaining = deadline - Stopwatch.GetElapsedTime(start);
+                var deadline = TimeSpan.FromSeconds(frames / 44100d); var remaining = deadline - _time.GetElapsedTime(start);
                 _sendSchedule.Observe(remaining);
                 if (elapsed >= nextReport)
                 {
                     ReportSendSchedule("发送状态"); nextReport = elapsed + TimeSpan.FromSeconds(30);
                 }
-                if (remaining > TimeSpan.Zero) await Task.Delay(remaining, linked.Token).ConfigureAwait(false);
+                if (remaining > TimeSpan.Zero) await _time.DelayAsync(remaining, linked.Token).ConfigureAwait(false);
                 else if (remaining < TimeSpan.FromSeconds(-0.5)) throw new IOException("发送线程落后超过500ms，已停止，避免持续堆积延迟。");
             }
             linked.Token.ThrowIfCancellationRequested();

@@ -18,6 +18,7 @@ public sealed record AudioSessionOptions(IPAddress RemoteAddress, int Port, IPAd
     ReceiverVolumeCurve VolumeCurve = ReceiverVolumeCurve.Native)
 {
     internal MediaTimeSource? TimeSource { get; init; }
+    public PlaybackTimingMode TimingMode { get; init; } = PlaybackTimingMode.Legacy;
 }
 
 // Only the independent loopback harness may relocate privileged UDP ports.
@@ -187,6 +188,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
         try
         {
             var fields = _options.AdvertisedProperties ?? new Dictionary<string, string?>();
+            _diagnostic?.Invoke("接收端能力：" + ReceiverCapabilities.Read(fields, DeviceInfo).DiagnosticFields);
             var usePtp = ReceiverTiming.UsesPtp(fields, DeviceInfo);
             var follow = usePtp && ReceiverTiming.FollowsReceiver(fields, DeviceInfo);
             var identity = _cohort?.Identity ?? Convert.FromHexString(_rtsp.ClientId);
@@ -365,6 +367,13 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
         var nextReport = TimeSpan.FromSeconds(30);
         var initialTimestamp = _timestamp;
         var anchor = _ptp?.Read();
+        var aligned = _options.TimingMode == PlaybackTimingMode.ClockAligned;
+        var recoveryLatency = members.Min(m => m.Latency);
+        var burst = 0;
+        TimeSpan TimelineElapsed()
+            => aligned && anchor is { } origin && _ptp is { } clock
+                ? PlaybackTimingPolicy.Elapsed(origin, clock.Read()) : _time.GetElapsedTime(start);
+        if (aligned) _diagnostic?.Invoke(FormattableString.Invariant($"时钟对齐试验：PTP={(anchor is null ? 0 : 1)}；恢复预算ms={PlaybackTimingPolicy.RecoveryBudget(recoveryLatency).TotalMilliseconds:F3}；采集率补偿=0。"));
         try
         {
             while (!linked.IsCancellationRequested)
@@ -376,6 +385,12 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
                 if (_pcmMuted) pcm.AsSpan().Clear();
                 foreach (var member in members) { member.EnsureOwned(); if (!member._volumeConfirmed) throw new IOException("Volume confirmation lost."); }
                 var ptpTime = _ptp?.Read();
+                if (aligned)
+                {
+                    var beforeSend = TimeSpan.FromSeconds(frames / 44100d) - TimelineElapsed();
+                    _sendSchedule.Observe(beforeSend);
+                    PlaybackTimingPolicy.CheckLateness(beforeSend, recoveryLatency);
+                }
                 if (elapsed >= nextSync)
                 {
                     byte[] sync;
@@ -403,13 +418,19 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
                     Interlocked.Increment(ref member._packetCount); member._sequence++;
                 }
                 _timestamp = unchecked(_timestamp + 352); frames += 352; first = false;
-                var deadline = TimeSpan.FromSeconds(frames / 44100d); var remaining = deadline - _time.GetElapsedTime(start);
+                var deadline = TimeSpan.FromSeconds(frames / 44100d); var remaining = deadline - TimelineElapsed();
                 _sendSchedule.Observe(remaining);
                 if (elapsed >= nextReport)
                 {
                     ReportSendSchedule("发送状态"); nextReport = elapsed + TimeSpan.FromSeconds(30);
                 }
-                if (remaining > TimeSpan.Zero) await _time.DelayAsync(remaining, linked.Token).ConfigureAwait(false);
+                if (aligned)
+                {
+                    PlaybackTimingPolicy.CheckLateness(remaining, recoveryLatency);
+                    if (remaining > TimeSpan.Zero) { burst = 0; await _time.DelayAsync(remaining, linked.Token).ConfigureAwait(false); }
+                    else if (++burst >= 4) { burst = 0; await _time.DelayAsync(TimeSpan.FromMilliseconds(1), linked.Token).ConfigureAwait(false); }
+                }
+                else if (remaining > TimeSpan.Zero) await _time.DelayAsync(remaining, linked.Token).ConfigureAwait(false);
                 else if (remaining < TimeSpan.FromSeconds(-0.5)) throw new IOException("发送线程落后超过500ms，已停止，避免持续堆积延迟。");
             }
             linked.Token.ThrowIfCancellationRequested();

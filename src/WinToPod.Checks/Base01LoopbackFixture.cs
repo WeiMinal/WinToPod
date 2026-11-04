@@ -65,12 +65,12 @@ internal sealed class Base01LoopbackFixture : IAsyncDisposable
     public long SyncPackets { get; private set; }
     public Action<uint, uint, long>? OnPtpSync { get; set; }
 
-    private Base01LoopbackFixture(RtspConnection connection, TcpClient peer, Base01TimeSource time, int ppm, uint latency)
+    private Base01LoopbackFixture(RtspConnection connection, TcpClient peer, Base01TimeSource time, int ppm, uint latency, PlaybackTimingMode mode)
     {
         _peer = peer; Time = time; _ppm = ppm;
         var ctor = typeof(RealtimeAudioSession).GetConstructors(BindingFlags.NonPublic | BindingFlags.Instance).Single();
         Session = (RealtimeAudioSession)ctor.Invoke([connection,
-            new AudioSessionOptions(IPAddress.Loopback, 1, IPAddress.Loopback, null, 20) { TimeSource = time },
+            new AudioSessionOptions(IPAddress.Loopback, 1, IPAddress.Loopback, null, 20) { TimeSource = time, TimingMode = mode },
             (Action<string>)Trace.Add, null]);
         Set("_configured", true); Set("_volumeConfirmed", true);
         Set("_timestamp", InitialTimestamp); Set("_latency", latency);
@@ -78,13 +78,13 @@ internal sealed class Base01LoopbackFixture : IAsyncDisposable
         Set("_dataEndpoint", _data.Client.LocalEndPoint!); Set("_controlEndpoint", _control.Client.LocalEndPoint!);
         Time.BeforeDelay = DrainAsync;
     }
-    public static async Task<Base01LoopbackFixture> OpenAsync(bool ptp = false, int ppm = 0, uint latency = 88200)
+    public static async Task<Base01LoopbackFixture> OpenAsync(bool ptp = false, int ppm = 0, uint latency = 88200, PlaybackTimingMode mode = PlaybackTimingMode.Legacy)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var accept = listener.AcceptTcpClientAsync();
         var connection = await RtspConnection.ConnectAsync(IPAddress.Loopback,
             ((IPEndPoint)listener.LocalEndpoint).Port, IPAddress.Loopback, default);
-        var fixture = new Base01LoopbackFixture(connection, await accept, new(), ppm, latency);
+        var fixture = new Base01LoopbackFixture(connection, await accept, new(), ppm, latency, mode);
         try { if (ptp) fixture.StartPtp(); return fixture; }
         catch { await fixture.DisposeAsync(); throw; }
     }

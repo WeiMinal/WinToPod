@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text.Json;
 using WinToPod.Core;
+if (args.FirstOrDefault() == "--v12-drift") return await V12TimingChecks.DriftAsync();
 if (args.FirstOrDefault() == "--base01-drift") return await Base01Drift.RunAsync();
 if (args.FirstOrDefault() == "--test-automatic-connection") return AutomaticConnectionChecks.Run();
 
@@ -283,6 +284,7 @@ checks.AddRange(SessionChecks.All());
 checks.AddRange(VolumeConfirmationChecks.All());
 checks.AddRange(PtpChecks.All());
 checks.AddRange(Base01Checks.All());
+checks.AddRange(V12TimingChecks.All());
 checks.Add(("PCM缓冲：下溢补静音、溢出丢最旧整帧、内存有界", () =>
 {
     var buffer = new PcmBuffer(1408); var data = Enumerable.Range(0, 1408).Select(i => (byte)i).ToArray();

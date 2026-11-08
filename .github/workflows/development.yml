@@ -33,3 +33,25 @@ jobs:
           name: preview-validation-${{ github.run_number }}
           path: artifacts/validation/
           if-no-files-found: ignore
+  clock-aligned-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r tests/requirements.txt
+      - name: Verify native stereo with ClockAligned
+        run: python tests/v12_native_regression.py --output artifacts/clock-aligned-native
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clock-aligned-native-${{ github.run_number }}
+          path: artifacts/clock-aligned-native/
+          if-no-files-found: warn

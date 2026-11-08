@@ -18,6 +18,13 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: python tools/CheckSource.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check browser companion lifecycle
+        run: node tests/video_sync_companion.mjs
+      - name: Check browser popup states
+        run: node tests/video_sync_popup.mjs
       - name: Build and validate Windows
         shell: pwsh
         run: ./tools/Build.ps1 -WindowsSelfCheck

@@ -24,6 +24,11 @@ if (args.FirstOrDefault() == "--test-native-pair")
         var addresses = new[] { System.Net.IPAddress.Parse("127.0.0.2"), System.Net.IPAddress.Parse("127.0.0.3") };
         var options = addresses.Select((remote, i) => new WinToPod.AirPlay.Media.AudioSessionOptions(remote, i == 0 ? leaderPort : secondaryPort,
             local, null, 20, addresses, new Dictionary<string, string?> { ["model"] = "AudioAccessory5,1", ["osvers"] = "27.0", ["tsid"] = "native-pair-test", ["flags"] = i == 0 ? "0xbac04" : "0xb8c84" }, new(31319, 31320), SenderIdentity: "CA58F410-91D9-4C29-A81E-998EC4B029C1")).ToArray();
+        if (Environment.GetEnvironmentVariable("WINTOPOD_CHECK_CLOCK_ALIGNED") == "1")
+        {
+            options = options.Select(o => o with { TimingMode = WinToPod.AirPlay.Media.PlaybackTimingMode.ClockAligned }).ToArray();
+            Console.WriteLine("V12_NATIVE_CLOCK_ALIGNED");
+        }
         if (mode.StartsWith("calibrated-", StringComparison.Ordinal)) options = options.Select(o => o with { VolumeCurve = WinToPod.AirPlay.Media.ReceiverVolumeCurve.DesktopCalibrated }).ToArray();
         if (mode == "password-supplied") options[1] = options[1] with { Password = "demo-secondary-secret" };
         if (mode == "password-both") options[0] = options[0] with { AdvertisedProperties = new Dictionary<string, string?>(options[0].AdvertisedProperties!) { ["flags"] = "0xbac84" } };

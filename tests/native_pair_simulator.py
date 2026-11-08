@@ -4,6 +4,7 @@ Asserts shared content/timeline/identity, leader-only volume and group failure.
 """
 import asyncio
 import json
+import os
 import sys
 from receiver_simulator import Peer
 
@@ -55,6 +56,8 @@ async def main():
             out, err = await asyncio.wait_for(process.communicate(), 35)
             if err: print(err.decode(), file=sys.stderr, end="")
             assert process.returncode == 0, (mode, out.decode(), err.decode())
+            if os.environ.get('WINTOPOD_CHECK_CLOCK_ALIGNED') == '1':
+                assert b'V12_NATIVE_CLOCK_ALIGNED' in out, 'Test driver did not enable ClockAligned'
             assert all(not p.errors for p in peers), (mode, [p.errors for p in peers])
             primary, secondary = peers
             assert primary.methods.count('POST /pair-setup') == (3 if mode == 'password-both' else 4 if mode.startswith('cache-') else 2), 'Unexpected leader authentication retry'

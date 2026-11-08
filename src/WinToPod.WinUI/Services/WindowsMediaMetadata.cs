@@ -21,7 +21,12 @@ internal static class WindowsMediaMetadata
             while (!cancellation.IsCancellationRequested)
             {
                 PlaybackMetadata? metadata;
-                try { metadata = await ReadAsync(manager, cancellation); }
+                try
+                {
+                    using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                    readTimeout.CancelAfter(TimeSpan.FromSeconds(5));
+                    metadata = await ReadAsync(manager, readTimeout.Token);
+                }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
                 catch
                 {
@@ -44,7 +49,7 @@ internal static class WindowsMediaMetadata
         if (playing.Length != 1) return null;
         var session = playing[0];
         var properties = await session.TryGetMediaPropertiesAsync().AsTask(cancellation);
-        if (string.IsNullOrWhiteSpace(properties.Title)) return null;
+        if (properties.PlaybackType != Windows.Media.MediaPlaybackType.Music || string.IsNullOrWhiteSpace(properties.Title)) return null;
         byte[]? jpeg = null;
         if (properties.Thumbnail is { } thumbnail)
         {
@@ -57,7 +62,7 @@ internal static class WindowsMediaMetadata
         var current = manager.GetSessions().Where(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToArray();
         if (current.Length != 1 || current[0].SourceAppUserModelId != session.SourceAppUserModelId) return null;
         var verify = await current[0].TryGetMediaPropertiesAsync().AsTask(cancellation);
-        if (verify.Title != properties.Title || verify.Artist != properties.Artist || verify.AlbumTitle != properties.AlbumTitle) return null;
+        if (verify.PlaybackType != Windows.Media.MediaPlaybackType.Music || verify.Title != properties.Title || verify.Artist != properties.Artist || verify.AlbumTitle != properties.AlbumTitle) return null;
         var timeline = current[0].GetTimelineProperties();
         var duration = timeline.EndTime - timeline.StartTime;
         var position = MediaTimeline.Position(timeline.Position - timeline.StartTime, duration,

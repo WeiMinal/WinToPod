@@ -113,6 +113,15 @@ public sealed class NativePlaybackSession : IAsyncDisposable
     }
     public Task RunAsync(Func<Memory<byte>, CancellationToken, ValueTask> readPcm, TimeSpan? duration, CancellationToken cancellation)
         => _members[0].RunMembersAsync(_members, readPcm, duration, cancellation);
+    public async Task PublishMetadataAsync(PlaybackMetadata? value, CancellationToken cancellation)
+    {
+        EnsureOwned();
+        foreach (var member in _members)
+        {
+            EnsureOwned();
+            await member.PublishMetadataAsync(value, cancellation).ConfigureAwait(false);
+        }
+    }
     private void EnsureOwned()
     { if (_closed) throw new IOException("连接已结束。"); _cohort?.ThrowIfFailed(); foreach (var member in _members) member.EnsureOwned(); }
     public async Task<bool> SetVolumeAndConfirmAsync(int percent, CancellationToken cancellation)

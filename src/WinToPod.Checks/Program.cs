@@ -286,6 +286,7 @@ checks.AddRange(PtpChecks.All());
 checks.AddRange(Base01Checks.All());
 checks.AddRange(V12TimingChecks.All());
 checks.AddRange(V12CaptureChecks.All());
+checks.AddRange(MetadataChecks.All());
 checks.Add(("PCM缓冲：下溢补静音、溢出丢最旧整帧、内存有界", () =>
 {
     var buffer = new PcmBuffer(1408); var data = Enumerable.Range(0, 1408).Select(i => (byte)i).ToArray();

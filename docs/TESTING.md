@@ -24,3 +24,7 @@ Windows CI 额外通过根目录启动器打开合成 WinUI 窗口，检查主�
 `dotnet run --project src/WinToPod.Checks -c Release --no-build -- --base01-drift` 对 +100、+50、0、-50、-100 ppm 各推进虚拟 8 小时，每小时读取真实发送循环产出的回环 RTP/Sync 包，扣除协商缓冲后输出样本差、毫秒及缓冲占比。PTP 样本直接驱动生产 Tracker，保留其偏移滤波；网络 PTP 收包、鉴权与真实采集不在此装置内。断言只校验装置与理论累计偏差的一致性，不把漂移数值当作产品通过标准。
 
 可用 `python tests/base01_regression.py --output artifacts/base01/run-01 --drift` 保存构建、核心检查及每个现有 Python 模拟场景的原始 stdout/stderr 和退出码；`--dotnet` 可指定 SDK 路径。模拟按顺序运行，soak 固定 `WINTOPOD_SOAK_SECONDS=120`；使用新目录以保留前次证据。短 soak 与虚拟 8 小时均不能替代真实 HomePod 长期播放。
+
+## V1.2 媒体信息检查
+
+新增5组检查：UTF-8/DMAP与长度限制、能力门控/去重/拒绝降级、带时间戳媒体快照推进、真实RTSP发送与清空/日志隐私、403后不再发送。均为模拟/确定性检查，不代表真机验证；Windows系统媒体读取与接收端实际展示、清空及灯效效果仍须实测。普通启动不启用媒体信息，体验入口新增 `--media-info`。

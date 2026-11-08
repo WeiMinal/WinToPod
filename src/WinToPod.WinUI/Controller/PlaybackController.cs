@@ -275,6 +275,10 @@ internal sealed class PlaybackController : IAsyncDisposable
     }
     private async Task RunSessionAsync(PlaybackEntry row, bool singleOverride, CancellationToken cancellation)
     {
+#if WINDOWS
+        using var metadataStop = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        Task? metadataTask = null;
+#endif
         NativePlaybackSession? session = null; var interrupted = false; var rememberFallback = false; AirPlayReceiver? resolvedReceiver = null;
         _activeSingleFallback = row.IsGroup && (singleOverride || _settings.SingleFallbackTargets.Contains(row.Key));
         try
@@ -330,6 +334,13 @@ internal sealed class PlaybackController : IAsyncDisposable
             AttachVolumeLink(_audio.EndpointId); _volumePoll.Start();
             await Task.Delay(120, cancellation); Log(_clockAligned ? "已启用V1.2时钟对齐与采集率补偿试验；由音箱控制播放音量。" : "开始推送电脑声音；采集样本保持原样，由音箱控制播放音量，不采集麦克风。");
             SetStatus(_activeSingleFallback ? $"单只兼容播放 · {receiver.Name}。左右声道已合并，原生组合保留。" : "正在推送电脑声音。");
+#if WINDOWS
+            if (Environment.GetCommandLineArgs().Contains("--media-info", StringComparer.Ordinal))
+            {
+                Log("已启用媒体信息同步：曲目与封面仅发往本次连接音箱，不保存到日志。");
+                metadataTask = Task.Run(() => Services.WindowsMediaMetadata.RunAsync(session, message => Ui(() => Log(message)), metadataStop.Token));
+            }
+#endif
             await session.RunAsync((memory, token) => ReadPlaybackPcmAsync(_audio.ReadAsync, memory, token), null, cancellation);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { Log("用户取消或停止连接，不会自动重连。"); SetStatus("已断开。需要时点击连接音箱。"); }
@@ -351,6 +362,10 @@ internal sealed class PlaybackController : IAsyncDisposable
         finally
         {
             _soundTest.Reset(); DetachVolumeLink(); _session = null; await UpdateVideoSyncAsync(waitForPrior: true);
+#if WINDOWS
+            await metadataStop.CancelAsync();
+            if (metadataTask is not null) await metadataTask;
+#endif
             ReportCaptureRate(true);
             try { _audio?.Dispose(); } catch (Exception e) { Log("采集停止提示：" + e.Message); } _audio = null;
             if (session is not null) try { await session.CloseAsync(!interrupted); } catch (Exception e) { Log("连接清理提示：" + e.Message); }

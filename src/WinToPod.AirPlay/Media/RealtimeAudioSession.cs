@@ -29,6 +29,7 @@ public sealed record PtpTestPorts(int Event, int General);
 // no volume command before explicit acquisition, no automatic retry/takeover.
 public sealed class RealtimeAudioSession : IAsyncDisposable
 {
+    private readonly MetadataPublisher _metadata = new();
     private RtspConnection _rtsp;
     private readonly AudioSessionOptions _options;
     private readonly CancellationTokenSource _lifetime = new();
@@ -327,6 +328,27 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
 
     public static double VolumeDb(int percent)
         => ReceiverVolume.Decibels(percent);
+
+    public async Task PublishMetadataAsync(PlaybackMetadata? value, CancellationToken cancellation)
+    {
+        EnsureOwned();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _lifetime.Token);
+        try
+        {
+            await _metadata.PublishAsync(value, ReceiverCapabilities.Read(_options.AdvertisedProperties ?? new Dictionary<string, string?>(), DeviceInfo),
+                Volatile.Read(ref _timestamp), async (type, bytes, timestamp, token) =>
+                {
+                    EnsureOwned();
+                    var response = await _rtsp.RequestAsync("SET_PARAMETER", _url, bytes, type,
+                        new Dictionary<string, string> { ["RTP-Info"] = "rtptime=" + timestamp.ToString(CultureInfo.InvariantCulture) }, token).ConfigureAwait(false);
+                    EnsureOwned();
+                    _diagnostic?.Invoke($"媒体信息：状态={response.Status}；字节={bytes.Length}。");
+                    return response.Status;
+                }, linked.Token).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is IOException or SocketException or TimeoutException)
+        { Fail(e); throw; }
+    }
 
     public async Task RunAsync(Func<Memory<byte>, CancellationToken, ValueTask> readPcm, TimeSpan? duration, CancellationToken cancellation)
         => await RunMembersAsync([this], readPcm, duration, cancellation).ConfigureAwait(false);

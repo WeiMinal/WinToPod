@@ -33,7 +33,7 @@ def main():
     assert check()==0
     stage=ROOT/'artifacts/win-x64'; validation=ROOT/'artifacts/validation'
     if args.preview:
-        (stage/'Start-V1.2-Preview.cmd').write_bytes(b'@echo off\r\nstart "" "%~dp0WinToPod.exe" --clock-aligned\r\n')
+        (stage/'Start-V1.2-Preview.cmd').write_bytes(b'@echo off\r\nstart "" "%~dp0WinToPod.exe" --clock-aligned --media-info\r\n')
         (stage/'V1.2体验说明.md').write_bytes((ROOT/'docs/V1.2-PREVIEW.md').read_bytes())
     inspection=inspect(stage)
     text=(validation/'checks.txt').read_text(encoding='utf-8-sig')

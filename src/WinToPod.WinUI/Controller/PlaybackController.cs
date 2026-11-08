@@ -338,7 +338,7 @@ internal sealed class PlaybackController : IAsyncDisposable
             if (Environment.GetCommandLineArgs().Contains("--media-info", StringComparer.Ordinal))
             {
                 Log("已启用媒体信息同步：曲目与封面仅发往本次连接音箱，不保存到日志。");
-                metadataTask = Task.Run(() => Services.WindowsMediaMetadata.RunAsync(session, message => Ui(() => Log(message)), metadataStop.Token));
+                metadataTask = Task.Run(() => global::WinToPod.WinUI.Services.WindowsMediaMetadata.RunAsync(session, message => Ui(() => Log(message)), metadataStop.Token));
             }
 #endif
             await session.RunAsync((memory, token) => ReadPlaybackPcmAsync(_audio.ReadAsync, memory, token), null, cancellation);

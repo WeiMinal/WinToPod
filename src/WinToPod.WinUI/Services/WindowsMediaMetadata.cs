@@ -56,16 +56,16 @@ internal static class WindowsMediaMetadata
         // or switched session. The next poll supplies the new session's data.
         var current = manager.GetSessions().Where(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToArray();
         if (current.Length != 1 || current[0].SourceAppUserModelId != session.SourceAppUserModelId) return null;
-        var verify = await session.TryGetMediaPropertiesAsync().AsTask(cancellation);
+        var verify = await current[0].TryGetMediaPropertiesAsync().AsTask(cancellation);
         if (verify.Title != properties.Title || verify.Artist != properties.Artist || verify.AlbumTitle != properties.AlbumTitle) return null;
-        var timeline = session.GetTimelineProperties();
+        var timeline = current[0].GetTimelineProperties();
         var duration = timeline.EndTime - timeline.StartTime;
         var position = MediaTimeline.Position(timeline.Position - timeline.StartTime, duration,
-            timeline.LastUpdatedTime, DateTimeOffset.UtcNow, session.GetPlaybackInfo().PlaybackRate);
+            timeline.LastUpdatedTime, DateTimeOffset.UtcNow, current[0].GetPlaybackInfo().PlaybackRate);
         return new(properties.Title, properties.Artist, properties.AlbumTitle, jpeg, position, duration);
     }
 
-    private static async Task<byte[]?> ReadJpegAsync(RandomAccessStreamReference thumbnail, CancellationToken cancellation)
+    private static async Task<byte[]?> ReadJpegAsync(IRandomAccessStreamReference thumbnail, CancellationToken cancellation)
     {
         using var source = await thumbnail.OpenReadAsync().AsTask(cancellation);
         if (source.Size is 0 or > 4 * 1024 * 1024) return null;

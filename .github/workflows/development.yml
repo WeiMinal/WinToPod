@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Development preview
+on:
+  push:
+    branches: [development]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - run: python tools/CheckSource.py
+      - name: Build and validate Windows
+        shell: pwsh
+        run: ./tools/Build.ps1 -WindowsSelfCheck
+      - run: python tools/Package.py --preview --output artifacts/preview
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinToPod-V1.2-preview-${{ github.run_number }}
+          path: artifacts/preview/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preview-validation-${{ github.run_number }}
+          path: artifacts/validation/
+          if-no-files-found: ignore

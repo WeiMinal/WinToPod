@@ -63,6 +63,17 @@ using (var source = await LoopbackAudioSource.OpenAsync(null, CancellationToken.
     if (!merged.SequenceEqual(new byte[] { 0xFF, 0x7F, 0, 0x80 })) throw new Exception("Independent source mix overflow wrapped.");
     processChecks.Add("independent mix clips safely instead of integer wrap");
 }
+using (var source = await LoopbackAudioSource.OpenAsync(null, default, requirePreMaster: true, clockAligned: true))
+{
+    var capture = ProcessAudioCapture.Instances.Last(); var data = new byte[6000 * 4];
+    for (var at = 0; at < data.Length; at += 4)
+    { BinaryPrimitives.WriteInt16LittleEndian(data.AsSpan(at), 1200); BinaryPrimitives.WriteInt16LittleEndian(data.AsSpan(at + 2), -2400); }
+    capture.Emit(data); var output = new byte[1408]; await source.ReadAsync(output, default); await source.ReadAsync(output, default);
+    if (source.RateSnapshot is null || BinaryPrimitives.ReadInt16LittleEndian(output) != 1200 || BinaryPrimitives.ReadInt16LittleEndian(output.AsSpan(2)) != -2400) throw new Exception("Preview capture channel/gain failure.");
+    capture.Emit(new byte[4], gap: true); await source.ReadAsync(output, default);
+    if (output.Any(b => b != 0) || source.RateSnapshot?.RebufferCount != 1) throw new Exception("Preview retained stale capture.");
+    processChecks.Add("clock-aligned capture preserves DC and stereo and clears discontinuity history");
+}
 Console.WriteLine(JsonSerializer.Serialize(new { passed = true, checks = processChecks, production_audio_source_linked = true, process_boundary_simulated = true, actual_windows_activation_tested = false }));
 Console.WriteLine(JsonSerializer.Serialize(new { passed = true, checks = volumeChecks, production_endpoint_link_linked = true, endpoint_boundary_simulated = true, saved_receiver_scale_unchanged = true, hardware_loudness_tested = false }));
 Console.WriteLine(JsonSerializer.Serialize(new { passed = true, checks, production_audio_source_linked = true, driver_boundary_simulated = true, actual_wasapi_tested = false, homepod_tested = false, fixed_pcm_gain = 1.0 }));

@@ -373,7 +373,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
         TimeSpan TimelineElapsed()
             => aligned && anchor is { } origin && _ptp is { } clock
                 ? PlaybackTimingPolicy.Elapsed(origin, clock.Read()) : _time.GetElapsedTime(start);
-        if (aligned) _diagnostic?.Invoke(FormattableString.Invariant($"时钟对齐试验：PTP={(anchor is null ? 0 : 1)}；恢复预算ms={PlaybackTimingPolicy.RecoveryBudget(recoveryLatency).TotalMilliseconds:F3}；采集率补偿=0。"));
+        if (aligned) _diagnostic?.Invoke(FormattableString.Invariant($"时钟对齐试验：PTP={(anchor is null ? 0 : 1)}；恢复预算ms={PlaybackTimingPolicy.RecoveryBudget(recoveryLatency).TotalMilliseconds:F3}。"));
         try
         {
             while (!linked.IsCancellationRequested)

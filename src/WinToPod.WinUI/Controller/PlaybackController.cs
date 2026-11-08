@@ -17,6 +17,8 @@ internal sealed class PlaybackController : IAsyncDisposable
 {
     private readonly DesktopSettings _settings;
     private readonly bool _enableAutomation;
+    private readonly bool _clockAligned = Environment.GetCommandLineArgs().Contains("--clock-aligned", StringComparer.Ordinal);
+    private long _nextCaptureReport;
     private readonly AutomaticConnectionPolicy _automation;
     private LocalUseMonitor? _localUse;
     private bool _pumpingAutomatic, _automaticConnecting, _autoSuccessObserved, _automaticAborted, _connectionRemembered, _settingsOpen;
@@ -291,7 +293,7 @@ internal sealed class PlaybackController : IAsyncDisposable
                 volume = Math.Min(volume, 10);
                 Log("首次使用修正后的应用声音采集，以不超过10%的音量起步，后续记忆手动调整。");
             }
-            var options = new AudioSessionOptions(remote, endpoint.Port, IPAddress.Parse(endpoint.InterfaceAddress), null, volume, peers, receiver.Properties, SenderIdentity: _settings.SenderIdentity, ReceiverId: receiver.Id, VolumeCurve: ReceiverVolumeCurve.DesktopCalibrated);
+            var options = new AudioSessionOptions(remote, endpoint.Port, IPAddress.Parse(endpoint.InterfaceAddress), null, volume, peers, receiver.Properties, SenderIdentity: _settings.SenderIdentity, ReceiverId: receiver.Id, VolumeCurve: ReceiverVolumeCurve.DesktopCalibrated) { TimingMode = _clockAligned ? PlaybackTimingMode.ClockAligned : PlaybackTimingMode.Legacy };
             var members = new List<AudioSessionOptions> { options };
             if (row.IsGroup && !_activeSingleFallback)
             {
@@ -301,7 +303,7 @@ internal sealed class PlaybackController : IAsyncDisposable
                 {
                     var memberEndpoint = PlaybackEntry.Endpoint(member) ?? throw new IOException("组合成员缺少网络地址，请重新搜索。");
                     var address = memberEndpoint.Addresses.Select(IPAddress.Parse).First(a => a.AddressFamily == AddressFamily.InterNetwork);
-                    members.Add(new(address, memberEndpoint.Port, IPAddress.Parse(memberEndpoint.InterfaceAddress), null, volume, peers, member.Properties, SenderIdentity: _settings.SenderIdentity, ReceiverId: member.Id, VolumeCurve: ReceiverVolumeCurve.DesktopCalibrated));
+                    members.Add(new(address, memberEndpoint.Port, IPAddress.Parse(memberEndpoint.InterfaceAddress), null, volume, peers, member.Properties, SenderIdentity: _settings.SenderIdentity, ReceiverId: member.Id, VolumeCurve: ReceiverVolumeCurve.DesktopCalibrated) { TimingMode = _clockAligned ? PlaybackTimingMode.ClockAligned : PlaybackTimingMode.Legacy });
                 }
             }
             session = await NativePlaybackSession.OpenAsync(members, message => Ui(() => { SetStatus(FriendlyProgress(message)); Log(message); }), cancellation,
@@ -319,13 +321,14 @@ internal sealed class PlaybackController : IAsyncDisposable
             _settings.Interrupted = false; _settings.NoticeDismissed = false; _settings.InterruptedReceiver = null; _settings.InterruptionReason = "unknown";
             if (!TrySaveSettings()) throw new IOException("音量已确认但设置无法保存，已停止发送声音。");
             RenderView(); _ui.CloseInterruption(); UpdateActions();
-            _audio = await LoopbackAudioSource.OpenAsync(null, cancellation, requirePreMaster: true);
+            _audio = await LoopbackAudioSource.OpenAsync(null, cancellation, requirePreMaster: true, clockAligned: _clockAligned);
+            _nextCaptureReport = 44100L * 30;
             _settings.WinUiPreMasterTargets.Add(row.Key);
             if (!TrySaveSettings()) throw new IOException("采集偏好无法保存，已停止推流。");
             Log("采集路径：" + _audio.CaptureMode + (_audio.CaptureFallback is null ? "" : "；兼容回退=" + _audio.CaptureFallback));
             if (_videoPlayer is { HasExited: false }) await _audio.IncludePlayerAsync(_videoPlayer.ProcessId, cancellation);
             AttachVolumeLink(_audio.EndpointId); _volumePoll.Start();
-            await Task.Delay(120, cancellation); Log("开始推送电脑声音；采集样本保持原样，由音箱控制播放音量，不采集麦克风。");
+            await Task.Delay(120, cancellation); Log(_clockAligned ? "已启用V1.2时钟对齐与采集率补偿试验；由音箱控制播放音量。" : "开始推送电脑声音；采集样本保持原样，由音箱控制播放音量，不采集麦克风。");
             SetStatus(_activeSingleFallback ? $"单只兼容播放 · {receiver.Name}。左右声道已合并，原生组合保留。" : "正在推送电脑声音。");
             await session.RunAsync((memory, token) => ReadPlaybackPcmAsync(_audio.ReadAsync, memory, token), null, cancellation);
         }
@@ -348,13 +351,22 @@ internal sealed class PlaybackController : IAsyncDisposable
         finally
         {
             _soundTest.Reset(); DetachVolumeLink(); _session = null; await UpdateVideoSyncAsync(waitForPrior: true);
+            ReportCaptureRate(true);
             try { _audio?.Dispose(); } catch (Exception e) { Log("采集停止提示：" + e.Message); } _audio = null;
             if (session is not null) try { await session.CloseAsync(!interrupted); } catch (Exception e) { Log("连接清理提示：" + e.Message); }
             _activeSingleFallback = false; _activeMemberName = null;
         }
     }
     private async ValueTask ReadPlaybackPcmAsync(Func<Memory<byte>, CancellationToken, ValueTask> source, Memory<byte> memory, CancellationToken cancellation)
-    { await source(memory, cancellation); _soundTest.Apply(memory.Span); if (_activeSingleFallback) PcmMix.ToDualMono(memory.Span); }
+    { await source(memory, cancellation); ReportCaptureRate(); _soundTest.Apply(memory.Span); if (_activeSingleFallback) PcmMix.ToDualMono(memory.Span); }
+
+    private void ReportCaptureRate(bool force = false)
+    {
+        if (_audio?.RateSnapshot is not { } capture || (!force && capture.OutputFrames < _nextCaptureReport)) return;
+        _nextCaptureReport = capture.OutputFrames + 44100L * 30;
+        var message = FormattableString.Invariant($"采集率补偿：结束={(force ? 1 : 0)}；补偿ppm={capture.CorrectionPpm:F3}；缓冲样本={capture.Buffer.BufferedFrames}；丢弃样本={capture.Buffer.DroppedFrames}；补零样本={capture.Buffer.MissingFrames}；重新预缓冲={capture.RebufferCount}；限幅样本={capture.ClippedSamples}；输出样本={capture.OutputFrames}。");
+        Ui(() => Log(message));
+    }
 
     private Task<string?> AskPasswordAsync(ReceiverPasswordRequest request, PlaybackEntry row, CancellationToken cancellation)
         => _ui.InvokeAsync(() => AskPasswordCoreAsync(request, row, cancellation));

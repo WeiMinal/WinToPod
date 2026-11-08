@@ -28,9 +28,13 @@ def checked_json(path):
 
 def main():
     parser=argparse.ArgumentParser(); parser.add_argument('--output',type=Path,default=ROOT/'artifacts/release')
+    parser.add_argument('--preview', action='store_true')
     args=parser.parse_args(); output=args.output.resolve(); output.mkdir(parents=True,exist_ok=True)
     assert check()==0
     stage=ROOT/'artifacts/win-x64'; validation=ROOT/'artifacts/validation'
+    if args.preview:
+        (stage/'Start-V1.2-Preview.cmd').write_bytes(b'@echo off\r\nstart "" "%~dp0WinToPod.exe" --clock-aligned\r\n')
+        (stage/'V1.2体验说明.md').write_bytes((ROOT/'docs/V1.2-PREVIEW.md').read_bytes())
     inspection=inspect(stage)
     text=(validation/'checks.txt').read_text(encoding='utf-8-sig')
     count=re.search(r'RESULT (\d+)/(\d+) passed',text)
@@ -43,9 +47,11 @@ def main():
         core_checks=int(count[1]),checks=reports,capture=capture,windows_ui=windows,
         real_homepod_tested_for_this_build=False,actual_windows_capture_tested=False,code_signed=False,
         full_stream_simulations='Not certified for V1.1; cloud simulations have triggered PTP/scheduling protection. See docs/TESTING.md.')
+    if args.preview: report.update(development_target='V1.2', preview=True, clock_aligned_opt_in='Start-V1.2-Preview.cmd')
     report_path=validation/'release.json';report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
     (stage/'app/VALIDATION.json').write_bytes(report_path.read_bytes())
-    package=output/'WinToPod-V1.1-win-x64.zip';source=output/'WinToPod-V1.1-source.zip'
+    label='V1.2-preview' if args.preview else 'V1.1'
+    package=output/f'WinToPod-{label}-win-x64.zip';source=output/f'WinToPod-{label}-source.zip'
     zip_atomic(package,[(p,p.relative_to(stage).as_posix()) for p in sorted(stage.rglob('*')) if p.is_file()])
     zip_atomic(source,[(p,'WinToPod/'+p.relative_to(ROOT).as_posix()) for p in public_files()])
     sums={p.name:dict(bytes=p.stat().st_size,sha256=hashlib.sha256(p.read_bytes()).hexdigest()) for p in [package,source]}

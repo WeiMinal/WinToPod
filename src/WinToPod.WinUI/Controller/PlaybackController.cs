@@ -193,6 +193,12 @@ internal sealed class PlaybackController : IAsyncDisposable
         try
         {
             var result = await new AirPlayBrowser().ScanAsync(TimeSpan.FromSeconds(10), cancellation: cancellation);
+            if (PlaybackEntries.Build(result.Snapshot).Any(PlaybackEntries.NeedsGroupRefresh))
+            {
+                Log("组合发现信息未完整，自动补查一次；不使用旧广播拼接组合。");
+                SetStatus("正在补全音箱组合信息……");
+                result = await new AirPlayBrowser().ScanAsync(TimeSpan.FromSeconds(10), cancellation: cancellation);
+            }
             if (_exiting || IsDisposed) return;
             _snapshot = result.Snapshot; PopulateTargets(result.Snapshot);
             foreach (var diagnostic in result.Diagnostics) Log("搜索提示：" + diagnostic.Message);
@@ -283,6 +289,25 @@ internal sealed class PlaybackController : IAsyncDisposable
         _activeSingleFallback = row.IsGroup && (singleOverride || _settings.SingleFallbackTargets.Contains(row.Key));
         try
         {
+            if (PlaybackEntries.NeedsGroupRefresh(row))
+            {
+                SetStatus("正在重新确认音箱组合……");
+                Log("连接前组合信息不完整，自动重新发现一次。");
+                var refreshed = await new AirPlayBrowser().ScanAsync(TimeSpan.FromSeconds(10), cancellation: cancellation);
+                cancellation.ThrowIfCancellationRequested();
+                _snapshot = refreshed.Snapshot;
+                var replacement = PlaybackEntries.FindRefreshedGroup(row, refreshed.Snapshot);
+                // Update presentation without invoking SelectionChanged (which would reset volume/settings).
+                _loading = true;
+                try { _devices.ReplaceTargets(PlaybackEntries.Build(refreshed.Snapshot), replacement?.Key ?? row.Key); }
+                finally { _loading = false; }
+                RenderView();
+                if (replacement is null)
+                    throw new IOException("自动重新搜索后，组合成员或唯一入口仍未确认。请稍后重试；无需拆开立体声组合。");
+                row = replacement; _activeEntry = row; _activeKey = row.Key;
+                _activeSingleFallback = singleOverride || _settings.SingleFallbackTargets.Contains(row.Key);
+                Log("自动补查已确认完整组合，继续本次连接。");
+            }
             SetStatus(row.Primary is null ? "正在确认这组音箱的连接入口……" : "正在连接音箱……");
             var receiver = await PlaybackEntries.ResolveAsync(row, cancellation); resolvedReceiver = receiver;
             var blockedIds = _activeSingleFallback ? new[] { receiver.Id } : row.Members.Select(m => m.Id);

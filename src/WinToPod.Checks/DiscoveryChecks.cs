@@ -192,6 +192,22 @@ internal static class DiscoveryChecks
             var entries = PlaybackEntries.Build(ReceiverDiscovery.Merge([tv, mac, a, b]));
             True(entries.Length == 4 && entries.Take(2).All(e => e.Members.All(m => m.IsHomePod)) && entries.All(e => e.Primary is not null));
         });
+        yield return Check("组合补查：缺失成员补全后按物理身份恢复，拒绝拆组及多主入口", () =>
+        {
+            var a = Resolve("音箱甲", "AA:BB:CC:DD:EE:01", "192.168.1.3") with { TightSyncId = SyncId, Properties = new Dictionary<string, string?> { ["flags"] = "0xb8c84" } };
+            var b = Resolve("音箱乙", "AA:BB:CC:DD:EE:02", "192.168.1.4") with { TightSyncId = SyncId, Properties = new Dictionary<string, string?> { ["flags"] = "0xbac04" } };
+            var partial = PlaybackEntries.Build(ReceiverDiscovery.Merge([a, b with { TightSyncId = null }])).Single(e => e.IsGroup);
+            True(PlaybackEntries.NeedsGroupRefresh(partial));
+            var full = ReceiverDiscovery.Merge([a, b]);
+            var repaired = PlaybackEntries.FindRefreshedGroup(partial, full);
+            True(repaired is not null && repaired.Members.Length == 2 && repaired.Primary?.Id == b.Id);
+            True(!PlaybackEntries.NeedsGroupRefresh(repaired!));
+            True(PlaybackEntries.FindRefreshedGroup(repaired!, ReceiverDiscovery.Merge([a])) is null);
+            True(PlaybackEntries.FindRefreshedGroup(partial, ReceiverDiscovery.Merge([a, b with { Properties = a.Properties }])) is null);
+            True(PlaybackEntries.FindRefreshedGroup(partial, ReceiverDiscovery.Merge([a with { Properties = b.Properties }, b])) is null);
+            True(PlaybackEntries.FindRefreshedGroup(partial, ReceiverDiscovery.Merge([a with { Id = "other" }, b])) is null);
+            True(!PlaybackEntries.NeedsGroupRefresh(PlaybackEntries.Build(ReceiverDiscovery.Merge([a with { TightSyncId = null }])).Single()));
+        });
         yield return Check("密码提示：flags/pw/sf识别密码与验证码，不把未知当有密码", () =>
         {
             CredentialRequirement Read(params (string Key, string? Value)[] values) => ReceiverAccess.Credentials(values.ToDictionary(p => p.Key, p => p.Value));

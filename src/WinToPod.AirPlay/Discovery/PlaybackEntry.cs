@@ -37,6 +37,20 @@ public static class PlaybackEntries
         return entries.OrderByDescending(e => e.Members.All(m => m.IsHomePod)).ThenBy(e => e.Name).ToArray();
     }
 
+    public static bool NeedsGroupRefresh(PlaybackEntry entry) => entry.IsGroup &&
+        (entry.Members.Length != 2 || entry.Primary is null ||
+         entry.Members.Any(m => !m.IsHomePod || m.TightSyncId is null || PlaybackEntry.Endpoint(m) is null) ||
+         entry.Members.Select(m => m.TightSyncId).Distinct().Count() != 1);
+
+    // Match by physical identity, never by a display name or proximity. Do not merge old DNS data.
+    public static PlaybackEntry? FindRefreshedGroup(PlaybackEntry previous, DiscoverySnapshot snapshot)
+    {
+        var ids = previous.Members.Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
+        var candidates = Build(snapshot).Where(e => e.IsGroup && !NeedsGroupRefresh(e) &&
+            ids.All(id => e.Members.Any(m => m.Id == id))).ToArray();
+        return candidates.Length == 1 ? candidates[0] : null;
+    }
+
     public static AirPlayReceiver? UniqueLeader(IEnumerable<AirPlayReceiver> members)
     {
         var leaders = members.Where(ReceiverAccess.IsTightSyncLeader).ToArray();

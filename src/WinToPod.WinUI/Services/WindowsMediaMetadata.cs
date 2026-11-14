@@ -16,24 +16,33 @@ internal static class WindowsMediaMetadata
         try { manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask(cancellation); }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
         catch { diagnostic("媒体信息：系统读取不可用；已停用本次同步。"); return; }
+        string? lastState = null;
+        void Report(string state)
+        {
+            if (state == lastState) return;
+            lastState = state; diagnostic("媒体信息状态：" + state);
+        }
         try
         {
             while (!cancellation.IsCancellationRequested)
             {
-                PlaybackMetadata? metadata;
+                ReadResult read;
                 try
                 {
                     using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
                     readTimeout.CancelAfter(TimeSpan.FromSeconds(5));
-                    metadata = await ReadAsync(manager, readTimeout.Token);
+                    read = await ReadAsync(manager, readTimeout.Token);
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
                 catch
                 {
                     await target.PublishMetadataAsync(null, cancellation);
-                    diagnostic("媒体信息：读取失败；已清空并停用本次同步。"); return;
+                    diagnostic("媒体信息：读取失败；已请求清空并停用本次同步。"); return;
                 }
-                await target.PublishMetadataAsync(metadata, cancellation);
+                await target.PublishMetadataAsync(read.Metadata, cancellation);
+                Report(read.Metadata is { } value
+                    ? $"已读取音乐；封面={(value.Jpeg is null ? "无" : "有")}；已交给能力门控发送链路，接收端显示待验证"
+                    : read.State + "；已请求清空，接收端效果待验证");
                 await Task.Delay(TimeSpan.FromSeconds(2), cancellation);
             }
         }
@@ -41,15 +50,17 @@ internal static class WindowsMediaMetadata
         catch { diagnostic("媒体信息：发送已停止；连接状态由原有保护处理。"); }
     }
 
-    private static async Task<PlaybackMetadata?> ReadAsync(GlobalSystemMediaTransportControlsSessionManager manager, CancellationToken cancellation)
+    private sealed record ReadResult(PlaybackMetadata? Metadata, string State);
+    private static async Task<ReadResult> ReadAsync(GlobalSystemMediaTransportControlsSessionManager manager, CancellationToken cancellation)
     {
         // CurrentSession alone can refer to a paused or unrelated player. Multiple
         // playing sessions cannot describe the mixed desktop audio unambiguously.
         var playing = manager.GetSessions().Where(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToArray();
-        if (playing.Length != 1) return null;
+        if (playing.Length != 1) return new(null, playing.Length == 0 ? "无正在播放的系统媒体会话" : "多个媒体会话同时播放");
         var session = playing[0];
         var properties = await session.TryGetMediaPropertiesAsync().AsTask(cancellation);
-        if (properties.PlaybackType != Windows.Media.MediaPlaybackType.Music || string.IsNullOrWhiteSpace(properties.Title)) return null;
+        if (properties.PlaybackType != Windows.Media.MediaPlaybackType.Music) return new(null, "来源未声明音乐类型");
+        if (string.IsNullOrWhiteSpace(properties.Title)) return new(null, "音乐来源未提供标题");
         byte[]? jpeg = null;
         if (properties.Thumbnail is { } thumbnail)
         {
@@ -60,14 +71,14 @@ internal static class WindowsMediaMetadata
         // Recheck after asynchronous thumbnail reads to avoid publishing a closed
         // or switched session. The next poll supplies the new session's data.
         var current = manager.GetSessions().Where(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToArray();
-        if (current.Length != 1 || current[0].SourceAppUserModelId != session.SourceAppUserModelId) return null;
+        if (current.Length != 1 || current[0].SourceAppUserModelId != session.SourceAppUserModelId) return new(null, "读取期间来源已切换");
         var verify = await current[0].TryGetMediaPropertiesAsync().AsTask(cancellation);
-        if (verify.PlaybackType != Windows.Media.MediaPlaybackType.Music || verify.Title != properties.Title || verify.Artist != properties.Artist || verify.AlbumTitle != properties.AlbumTitle) return null;
+        if (verify.PlaybackType != Windows.Media.MediaPlaybackType.Music || verify.Title != properties.Title || verify.Artist != properties.Artist || verify.AlbumTitle != properties.AlbumTitle) return new(null, "读取期间曲目已变化");
         var timeline = current[0].GetTimelineProperties();
         var duration = timeline.EndTime - timeline.StartTime;
         var position = MediaTimeline.Position(timeline.Position - timeline.StartTime, duration,
             timeline.LastUpdatedTime, DateTimeOffset.UtcNow, current[0].GetPlaybackInfo().PlaybackRate);
-        return new(properties.Title, properties.Artist, properties.AlbumTitle, jpeg, position, duration);
+        return new(new(properties.Title, properties.Artist, properties.AlbumTitle, jpeg, position, duration), "ready");
     }
 
     private static async Task<byte[]?> ReadJpegAsync(IRandomAccessStreamReference thumbnail, CancellationToken cancellation)

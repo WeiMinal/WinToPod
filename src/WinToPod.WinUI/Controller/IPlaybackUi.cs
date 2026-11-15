@@ -24,5 +24,5 @@ internal interface IUiTimer : IDisposable
     void Stop();
 }
 internal sealed record PasswordAnswer(string Password, bool Remember);
-internal sealed record Preferences(ConnectionPolicy Policy, bool StartAtLogin, bool AutoConnect, bool HideOnClose, bool PreferSingle);
+internal sealed record Preferences(ConnectionPolicy Policy, bool StartAtLogin, bool AutoConnect, bool HideOnClose, bool PreferSingle, bool PreferReducedLatency = false);
 internal sealed record CaptureChoice(string Name, string? Id) { public override string ToString() => Name; }

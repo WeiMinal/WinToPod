@@ -17,7 +17,7 @@ internal sealed class PlaybackController : IAsyncDisposable
 {
     private readonly DesktopSettings _settings;
     private readonly bool _enableAutomation;
-    private readonly bool _clockAligned = Environment.GetCommandLineArgs().Contains("--clock-aligned", StringComparer.Ordinal);
+    private bool _clockAligned => _settings.PreferReducedLatency || Environment.GetCommandLineArgs().Contains("--clock-aligned", StringComparer.Ordinal);
     private long _nextCaptureReport;
     private readonly AutomaticConnectionPolicy _automation;
     private LocalUseMonitor? _localUse;
@@ -34,7 +34,6 @@ internal sealed class PlaybackController : IAsyncDisposable
     private readonly ActionState _connect = new("连接音箱"), _singleFallback = new("先用一只播放");
     private readonly StatusState _status = new("双击音箱或点击连接。");
     private readonly VolumeState _volume = new();
-    private GlobalSyncBridge? _globalSyncBridge;
 
     private readonly IUiTimer _stats, _volumeDebounce;
     private readonly SemaphoreSlim _preferencesGate = new(1, 1);
@@ -60,7 +59,7 @@ internal sealed class PlaybackController : IAsyncDisposable
     private string? _activeKey, _linkedEndpointId;
     private bool _loading = true, _exiting, _applyingVolume, _stateFailed, _working;
 
-    public PlaybackController(DesktopSettings settings, IPlaybackUi ui, bool startup, bool enableGlobalSyncBridge = true, bool enableAutomation = true)
+    public PlaybackController(DesktopSettings settings, IPlaybackUi ui, bool startup, bool enableAutomation = true)
     {
         _ui = ui; _enableAutomation = enableAutomation;
         _automation = new(settings.Policy, settings.AutoConnectOnStart, settings.LastConnectedReceiver);
@@ -80,8 +79,7 @@ internal sealed class PlaybackController : IAsyncDisposable
         };
         _volumeDebounce.Tick += async () => { _volumeDebounce.Stop(); await ApplyVolumeAsync(); };
         _volumePoll.Tick += async () => await PullVolumeAsync();
-        if (enableGlobalSyncBridge) try { _globalSyncBridge = new(); } catch (SocketException) { Log("全局补偿状态接口不可用；声音推送仍可使用。"); }
-        _stats.Tick += async () => { UpdateStats(); UpdateGlobalSync(); await PumpAutomaticAsync(); };
+        _stats.Tick += async () => { UpdateStats(); await PumpAutomaticAsync(); };
         _loading = false; UpdateActions();
         Log("WinToPod V1.1 · WinUI 3");
     }
@@ -230,11 +228,14 @@ internal sealed class PlaybackController : IAsyncDisposable
         {
         var cancelAutomatic = _automation.InFlightReason == AutomaticConnectionReason.Reclaim && preferences.Policy == ConnectionPolicy.Conservative ||
             _automation.InFlightReason == AutomaticConnectionReason.Startup && !preferences.AutoConnect;
+        if (preferences.PreferReducedLatency != _settings.PreferReducedLatency && (_working || _session is not null))
+            throw new InvalidOperationException("请先断开音箱，再更改声音缓冲策略。");
         StartupRegistration.Apply(preferences.StartAtLogin);
         _settings.Policy = preferences.Policy; _settings.AutoConnectOnStart = preferences.AutoConnect;
         _automation.Configure(preferences.Policy, preferences.AutoConnect);
         if (cancelAutomatic) { _automaticAborted = true; await StopAsync(userInitiated: false); }
         _settings.HideOnClose = preferences.HideOnClose;
+        _settings.PreferReducedLatency = preferences.PreferReducedLatency;
         if (Selected?.IsGroup == true)
         {
             if (preferences.PreferSingle) _settings.SingleFallbackTargets.Add(Selected.Key);
@@ -319,7 +320,7 @@ internal sealed class PlaybackController : IAsyncDisposable
                 volume = Math.Min(volume, 10);
                 Log("首次使用修正后的应用声音采集，以不超过10%的音量起步，后续记忆手动调整。");
             }
-            var options = new AudioSessionOptions(remote, endpoint.Port, IPAddress.Parse(endpoint.InterfaceAddress), null, volume, peers, receiver.Properties, SenderIdentity: _settings.SenderIdentity, ReceiverId: receiver.Id, VolumeCurve: ReceiverVolumeCurve.DesktopCalibrated) { TimingMode = _clockAligned ? PlaybackTimingMode.ClockAligned : PlaybackTimingMode.Legacy };
+            var options = new AudioSessionOptions(remote, endpoint.Port, IPAddress.Parse(endpoint.InterfaceAddress), null, volume, peers, receiver.Properties, SenderIdentity: _settings.SenderIdentity, ReceiverId: receiver.Id, VolumeCurve: ReceiverVolumeCurve.DesktopCalibrated) { TimingMode = _clockAligned ? PlaybackTimingMode.ClockAligned : PlaybackTimingMode.Legacy, LatencyMode = _settings.PreferReducedLatency ? AudioLatencyMode.ReducedExperimental : AudioLatencyMode.Standard };
             var members = new List<AudioSessionOptions> { options };
             if (row.IsGroup && !_activeSingleFallback)
             {
@@ -329,7 +330,7 @@ internal sealed class PlaybackController : IAsyncDisposable
                 {
                     var memberEndpoint = PlaybackEntry.Endpoint(member) ?? throw new IOException("组合成员缺少网络地址，请重新搜索。");
                     var address = memberEndpoint.Addresses.Select(IPAddress.Parse).First(a => a.AddressFamily == AddressFamily.InterNetwork);
-                    members.Add(new(address, memberEndpoint.Port, IPAddress.Parse(memberEndpoint.InterfaceAddress), null, volume, peers, member.Properties, SenderIdentity: _settings.SenderIdentity, ReceiverId: member.Id, VolumeCurve: ReceiverVolumeCurve.DesktopCalibrated) { TimingMode = _clockAligned ? PlaybackTimingMode.ClockAligned : PlaybackTimingMode.Legacy });
+                    members.Add(new(address, memberEndpoint.Port, IPAddress.Parse(memberEndpoint.InterfaceAddress), null, volume, peers, member.Properties, SenderIdentity: _settings.SenderIdentity, ReceiverId: member.Id, VolumeCurve: ReceiverVolumeCurve.DesktopCalibrated) { TimingMode = _clockAligned ? PlaybackTimingMode.ClockAligned : PlaybackTimingMode.Legacy, LatencyMode = _settings.PreferReducedLatency ? AudioLatencyMode.ReducedExperimental : AudioLatencyMode.Standard });
                 }
             }
             session = await NativePlaybackSession.OpenAsync(members, message => Ui(() => { SetStatus(FriendlyProgress(message)); Log(message); }), cancellation,
@@ -342,7 +343,7 @@ internal sealed class PlaybackController : IAsyncDisposable
             _session = session; RememberVolume(row.Key, session.LastConfirmedVolume!.Value);
             if (_activeSingleFallback && rememberFallback) _settings.SingleFallbackTargets.Add(row.Key);
             Log(_activeSingleFallback ? "当前模式：单只兼容播放；仅主成员一条音频链路，左右声道合并。" : row.IsGroup ? "当前模式：双成员原生立体声。" : "当前模式：单个AirPlay设备。");
-            Log($"协商音频缓冲：{session.LatencyFrames}采样 / {GlobalSyncState.FromFrames(session.LatencyFrames)}毫秒；这是协议估算，不是实测声学延迟。");
+            Log($"发送端播放提前量：{session.LatencyFrames}采样 / {session.LatencyFrames * 1000d / 44100:F0}毫秒；非实测声学延迟。");
             SetDisplayedVolume(session.LastConfirmedVolume.Value);
             _settings.Interrupted = false; _settings.NoticeDismissed = false; _settings.InterruptedReceiver = null; _settings.InterruptionReason = "unknown";
             if (!TrySaveSettings()) throw new IOException("音量已确认但设置无法保存，已停止发送声音。");
@@ -382,7 +383,7 @@ internal sealed class PlaybackController : IAsyncDisposable
         }
         finally
         {
-            _soundTest.Reset(); DetachVolumeLink(); _session = null; UpdateGlobalSync();
+            _soundTest.Reset(); DetachVolumeLink(); _session = null;
 #if WINDOWS
             await metadataStop.CancelAsync();
             if (metadataTask is not null) await metadataTask;
@@ -441,7 +442,7 @@ internal sealed class PlaybackController : IAsyncDisposable
         if (userInitiated) _automation.Pause();
         _soundTest.Reset(); DetachVolumeLink(); _scanCancel?.Cancel(); _sessionCancel?.Cancel(); _ui.CancelPrompts();
         if (_sessionTask is not null) { _connect.Enabled = false; SetStatus("正在断开……"); }
-        UpdateGlobalSync();
+
         if (_sessionTask is { } task) { _connect.Enabled = false; SetStatus("正在断开……"); await task; }
     }
     private async Task ApplyVolumeAsync()
@@ -585,7 +586,6 @@ internal sealed class PlaybackController : IAsyncDisposable
     {
         _automation.Interrupted(key);
         DetachVolumeLink();
-        _globalSyncBridge?.Update(GlobalSyncState.Offline);
         var pending = _settings.Interrupted && _settings.InterruptedReceiver == key;
         _settings.Interrupted = true; _settings.InterruptedReceiver = key; if (!pending) _settings.NoticeDismissed = false;
         _settings.InterruptionReason = error is null ? "unknown" : SessionInterruption.Find(error)?.Category ?? "unknown";
@@ -647,14 +647,9 @@ internal sealed class PlaybackController : IAsyncDisposable
         ? $"另一只音箱需等待{WaitDuration(RetrySeconds(row))}；现在可先用{row.Primary!.Name}播放。"
         : $"音箱要求等待{WaitDuration(RetrySeconds(row))}，期间不会重新验证。";
     private bool CanTestSound() => _session is not null && _audio is not null && !_settings.Interrupted && _sessionCancel?.IsCancellationRequested == false;
-    private GlobalSyncState CurrentGlobalSyncState()
-    {
-        if (!CanTestSound() || _activeKey is null) return GlobalSyncState.Offline;
-        return new(true, GlobalSyncState.FromFrames(_session!.LatencyFrames, _audio?.EstimatedCaptureLagMs ?? 0));
-    }
-    private void UpdateGlobalSync() => _globalSyncBridge?.Update(CurrentGlobalSyncState());
-    public bool GlobalSyncAvailable => _globalSyncBridge is not null;
-    public GlobalSyncState GlobalTiming => CurrentGlobalSyncState();
+    public string AudioLatencyDescription => !CanTestSound() ? "连接后显示发送端缓冲与本机采集队列；实际出声延迟需另行测量。"
+        : $"发送端播放提前量：{_session!.LatencyFrames * 1000d / 44100:F0}ms\n本机采集队列估算：{_audio!.EstimatedCaptureLagMs}ms\n以上均非实测声学延迟。" +
+          (_session.LatencyReports.Any(r => r.Decision == "receiver-window-incomplete-standard-target") ? "\n音箱未完整返回缓冲范围，本次保留标准目标。" : "");
     public (bool Available, bool Active, bool CanStop, string Description) SoundTestState()
     {
         var state = _soundTest.Status;
@@ -737,7 +732,7 @@ internal sealed class PlaybackController : IAsyncDisposable
                 Groups = (_snapshot?.GroupCandidates ?? []).Select(g => new { g.TwoHomePods, g.Status, Members = g.MemberIds.Select(Token) }),
                 Selection = Selected is { } row ? new { Token = Token(row.Key), Primary = row.Primary is null ? null : Token(row.Primary.Id), HasEndpoint = row.HasIpv4Endpoint } : null,
                 ConnectActionEnabled = _connect.Enabled, Working = _working, Packets = _session?.PacketsSent, Resends = _session?.Retransmits, InputPeak = _audio?.Peak, CapturePcmGain = 1.0, CaptureMode = _audio?.CaptureMode, CaptureFallback = _audio?.CaptureFallback, CaptureReceivedFrames = _audio?.ReceivedFrames, CaptureDiscontinuities = _audio?.Discontinuities, InputPeakDbfs = _audio is { Peak: > 0 } meter ? (double?)(20 * Math.Log10(meter.Peak)) : null,
-                NegotiatedLatencyFrames = _session?.LatencyFrames, EstimatedLatencyMs = _session is null ? (int?)null : GlobalSyncState.FromFrames(_session.LatencyFrames), GlobalSyncTiming = CurrentGlobalSyncState(), GlobalSyncBridgeAvailable = _globalSyncBridge is not null, CaptureLagEstimateMs = _audio?.EstimatedCaptureLagMs, InputBufferedFrames = _audio?.BufferedFrames, InputDroppedFrames = _audio?.DroppedFrames, InputMissingFrames = _audio?.MissingFrames,
+                SenderLeadFrames = _session?.LatencyFrames, AudioLatencyReports = _session?.LatencyReports, AcousticLatencyMeasured = false, PreferReducedLatency = _settings.PreferReducedLatency, CaptureLagEstimateMs = _audio?.EstimatedCaptureLagMs, InputBufferedFrames = _audio?.BufferedFrames, InputDroppedFrames = _audio?.DroppedFrames, InputMissingFrames = _audio?.MissingFrames,
                 MemberPackets = _session?.MemberPackets, VolumeLinkActive = _volumeLink is not null, SettingsEnabled = !_exiting, VolumePercent = _volume.Value, ConfirmedPanelVolumePercent = _session is not null && _activeKey is { } ownedKey ? (int?)_settings.Volumes.GetValueOrDefault(ownedKey) : null, Appearance = _settings.WinUiAppearance.ToString(), VolumeUpdateUnconfirmed = _volumeUnconfirmed, VolumeCurve = "desktop-calibrated-v1", ReceiverVolumeDb = _session is not null && _activeKey is { } volumeKey ? (double?)ReceiverVolume.Decibels(_settings.Volumes.GetValueOrDefault(volumeKey), ReceiverVolumeCurve.DesktopCalibrated) : null, CaptureRequiresPreMaster = true, WindowsEndpointVolume = _volumeLink?.Snapshot(),
                 PlaybackMode = _session is null ? "None" : _activeSingleFallback ? "SingleFallbackDualMono" : Selected?.IsGroup == true ? "NativePair" : "Single", PreferSingleForSelectedTarget = Selected is { } selectedTarget && _settings.SingleFallbackTargets.Contains(selectedTarget.Key),
                 PersistedInterruption = _settings.Interrupted, InterruptionReason = _settings.Interrupted ? Redact(_settings.InterruptionReason ?? "") : null
@@ -753,7 +748,7 @@ internal sealed class PlaybackController : IAsyncDisposable
         if (_scanTask is { } scan) await scan;
         _stats.Stop(); _volumeDebounce.Stop(); _volumePoll.Stop();
         _ui.CloseInterruption(); _localUse?.Dispose(); _localUse = null;
-        DetachVolumeLink(); _globalSyncBridge?.Dispose();
+        DetachVolumeLink();
         _stats.Dispose(); _volumeDebounce.Dispose(); _volumePoll.Dispose();
         _pairingStore.Dispose(); _playbackCredentials.Dispose(); _disposed = true;
     }

@@ -594,6 +594,7 @@ class Peer:
                         assert stream['shk'] == self.audio_key and stream['audioFormat'] == 0x40000
                         self.sender_control = stream['controlPort']
                         response = {'streams': [{'controlPort': self.control.transport.get_extra_info('sockname')[1], 'dataPort': self.data.transport.get_extra_info('sockname')[1]}]}
+                        response['streams'][0].update(getattr(self, 'latency_fields', {}))
                         await wire.response(headers, plistlib.dumps(response, fmt=plistlib.FMT_BINARY), status='453 Rejected' if self.mode == 'ptp-native-reject-stream' else '200 OK')
                 elif method == 'RECORD':
                     assert session_setup

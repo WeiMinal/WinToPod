@@ -7,7 +7,6 @@ if (args.FirstOrDefault() == "--test-automatic-connection") return AutomaticConn
 
 if (args.FirstOrDefault() == "--test-digest") return await DigestChecks.Run(args);
 if (args.FirstOrDefault() == "--test-stability") return await StabilityChecks.Run(args);
-if (args.FirstOrDefault() == "--test-global-sync") return await GlobalSyncBridgeChecks.Run();
 
 if (args.FirstOrDefault() == "--test-native-pair")
 {
@@ -29,6 +28,7 @@ if (args.FirstOrDefault() == "--test-native-pair")
             options = options.Select(o => o with { TimingMode = WinToPod.AirPlay.Media.PlaybackTimingMode.ClockAligned }).ToArray();
             Console.WriteLine("V12_NATIVE_CLOCK_ALIGNED");
         }
+        if (mode.StartsWith("latency-", StringComparison.Ordinal)) options = options.Select(o => o with { LatencyMode = WinToPod.AirPlay.Media.AudioLatencyMode.ReducedExperimental }).ToArray();
         if (mode.StartsWith("calibrated-", StringComparison.Ordinal)) options = options.Select(o => o with { VolumeCurve = WinToPod.AirPlay.Media.ReceiverVolumeCurve.DesktopCalibrated }).ToArray();
         if (mode == "password-supplied") options[1] = options[1] with { Password = "demo-secondary-secret" };
         if (mode == "password-both") options[0] = options[0] with { AdvertisedProperties = new Dictionary<string, string?>(options[0].AdvertisedProperties!) { ["flags"] = "0xbac84" } };
@@ -55,6 +55,14 @@ if (args.FirstOrDefault() == "--test-native-pair")
                 return Task.FromResult<string?>(request.RemoteAddress.Equals(addresses[0]) ? "demo-primary-secret" : "demo-secondary-secret");
             }, pairingStore: pairings);
         playback = await Connect();
+        if (mode.StartsWith("latency-", StringComparison.Ordinal))
+        {
+            if (mode == "latency-conflict") throw new Exception("Conflicting group window became ready.");
+            var expectedLead = mode switch { "latency-reduced" => 26460, "latency-clamped" => 44100, _ => 88200 };
+            if (playback.LatencyFrames != expectedLead || playback.LatencyReports.Any(r => r.SelectedFrames != expectedLead))
+                throw new Exception("Group did not use the negotiated common lead.");
+            Console.WriteLine("AUDIO_SENDER_LEAD_FRAMES=" + expectedLead);
+        }
         if (mode.StartsWith("calibrated-", StringComparison.Ordinal))
         {
             foreach (var percent in new[] { 1, 2, 5, 8, 10, 15, 16, 25, 35, 50, 75, 99, 100, 0, 2, 25, 50 })
@@ -147,6 +155,8 @@ if (args.FirstOrDefault() == "--test-native-pair")
     { Console.WriteLine("FALLBACK_CANCELLED_NO_AUDIO"); return 0; }
     catch (IOException) when (mode == "fallback-volume-reject" && sent == 0 && consentCalls == 1)
     { Console.WriteLine("FALLBACK_VOLUME_NOT_CONFIRMED_NO_AUDIO"); return 0; }
+    catch (InvalidDataException) when (mode == "latency-conflict" && sent == 0)
+    { Console.WriteLine("LATENCY_CONFLICT_NO_AUDIO"); return 0; }
     catch (IOException) when (mode is "no-clock" or "reject-stream" or "volume-reject" && sent == 0)
     { Console.WriteLine("NATIVE_PAIR_REJECTED_NO_AUDIO"); return 0; }
     catch (IOException) when (mode is "interrupt" or "clock-loss" && sent > 30)
@@ -290,6 +300,7 @@ checks.AddRange(VolumeConfirmationChecks.All());
 checks.AddRange(PtpChecks.All());
 checks.AddRange(Base01Checks.All());
 checks.AddRange(V12TimingChecks.All());
+checks.AddRange(AudioLatencyChecks.All());
 checks.AddRange(V12CaptureChecks.All());
 checks.AddRange(MetadataChecks.All());
 checks.Add(("PCM缓冲：下溢补静音、溢出丢最旧整帧、内存有界", () =>

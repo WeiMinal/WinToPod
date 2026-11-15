@@ -19,6 +19,7 @@ public sealed record AudioSessionOptions(IPAddress RemoteAddress, int Port, IPAd
 {
     internal MediaTimeSource? TimeSource { get; init; }
     public PlaybackTimingMode TimingMode { get; init; } = PlaybackTimingMode.Legacy;
+    public AudioLatencyMode LatencyMode { get; init; } = AudioLatencyMode.Standard;
 }
 
 // Only the independent loopback harness may relocate privileged UDP ports.
@@ -53,6 +54,12 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
     private uint _timestamp, _ssrc;
     private ushort _sequence;
     private uint _latency = 88200;
+    internal AudioLatencyReport LatencyReport { get; private set; } = AudioLatencyPolicy.Read(AudioLatencyMode.Standard, new Dictionary<string, object?>());
+    internal void ApplyLatency(AudioLatencyReport report)
+    {
+        if (_audioStarted) throw new InvalidOperationException("Cannot change a live audio timeline.");
+        LatencyReport = report; _latency = report.SelectedFrames;
+    }
     private bool _configured, _disposed, _audioStarted, _volumeConfirmed;
     private volatile bool _pcmMuted;
     private double? _muteReadbackDb;
@@ -259,10 +266,8 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
                 throw new InvalidDataException("音箱没有返回有效的音频流端口。");
             _dataEndpoint = new(_options.RemoteAddress, TryPort(received, "dataPort") ?? throw new InvalidDataException("缺少音频dataPort。"));
             _controlEndpoint = new(_options.RemoteAddress, TryPort(received, "controlPort") ?? throw new InvalidDataException("缺少controlPort。"));
-            if (received.TryGetValue("latencyMin", out var minimum) && minimum is ulong min && min <= 441000)
-                _latency = Math.Max(_latency, (uint)min);
-            if (received.TryGetValue("latencyMax", out var maximum) && maximum is ulong max && max >= 11025 && max <= 441000)
-                _latency = Math.Min(_latency, (uint)max);
+            ApplyLatency(AudioLatencyPolicy.Read(_options.LatencyMode, received));
+            _diagnostic?.Invoke($"音频缓冲选择：策略={LatencyReport.Mode}；请求样本={LatencyReport.RequestedFrames}；接收端最小样本={LatencyReport.ReceiverMinimumFrames?.ToString() ?? "未返回"}；接收端最大样本={LatencyReport.ReceiverMaximumFrames?.ToString() ?? "未返回"}；发送端提前量样本={_latency}；原因={LatencyReport.Decision}；非实测声学延迟。");
             if (_ptp is not null)
             {
                 progress?.Invoke("正在确认音箱同步时钟");
@@ -464,7 +469,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
     }
 
     private void ReportSendSchedule(string label)
-        => _diagnostic?.Invoke($"{label}：" + _sendSchedule.Snapshot.DiagnosticFields + $"；协商缓冲样本={_latency}；已发包={PacketsSent}。");
+        => _diagnostic?.Invoke($"{label}：" + _sendSchedule.Snapshot.DiagnosticFields + $"；发送提前量样本={_latency}；已发包={PacketsSent}。");
 
     private async Task<Dictionary<string, object?>> PlistAsync(string method, Dictionary<string, object?> body, CancellationToken cancellation)
     {

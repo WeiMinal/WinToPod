@@ -31,14 +31,6 @@ python tests/stability_simulator.py dotnet src/WinToPod.Checks/bin/Release/net10
 
 按顺序执行，模拟器共享回环 PTP 端口 31319/31320。生产端口仍为 319/320。稳定性默认约 11 分钟，缩短执行不能算长期验证。V1.1 云端完整推流模拟存在 PTP/调度保护触发，不能视为全部通过，见 [验证范围](TESTING.md)。
 
-## 全局补偿检查
+## 音频缓冲检查
 
-```sh
-dotnet run --project src/WinToPod.Checks -c Release -- --test-global-sync
-dotnet run --project tests/WinToPod.GlobalSyncChecks -c Release
-```
-
-Build.ps1 同时构建独立全局实验进程到 `app/全局补偿`，执行状态接口和帧队列检查。打包检查要求组件与自包含运行时完整，拒绝旧浏览器目录；从主程序设置打开组件。主界面仍为WinUI 3，只有实验进程依赖Windows Forms。
-浏览器扩展、播放器遥控与对应npm/测试视频依赖已移除。图标重建使用 `tools/BuildBrand.py` 和 `tools/requirements.txt`。
-
-Linux 可交叉编译 WinUI 和 C 启动器，但不能运行 Windows 界面。Windows App SDK 的 Windows 资源工具需要适配；正式 CI 使用 Windows 原生工具链。不得用交叉编译或替代边界测试冒充 Windows/HomePod 实测。
+音频范围、组合交集、PTP报文和采集估算检查包含在WinToPod.Checks完整核心检查中。`tests/v12_native_regression.py`覆盖原生对全部场景，新增较低缓冲、接收端抬升、缺项回退及范围冲突。Build.ps1不再编译屏幕延后组件；Inspect.py禁止旧浏览器、屏幕组件和WinForms运行时入包，Windows自检检查“声音延迟”页。

@@ -16,7 +16,7 @@ internal static class V12TimingChecks
             Base01Checks.True(!capability.DiagnosticFields.Contains("999") && !capability.DiagnosticFields.Contains("27.2"));
             return Task.CompletedTask;
         });
-        foreach (var (stall, latency, stop) in new[] { (.4, 88200U, false), (.6, 88200U, false), (1.1, 88200U, true), (.2, 11025U, true) })
+        foreach (var (stall, latency, stop) in new[] { (.4, 88200U, false), (.6, 88200U, false), (1.1, 88200U, true), (.2, 11025U, true), (.2, 26460U, false), (.31, 26460U, true) })
             yield return ($"V1.2｜卡顿{stall:F1}秒、缓冲{latency}样本", async () =>
             {
                 await using var f = await Base01LoopbackFixture.OpenAsync(latency: latency, mode: PlaybackTimingMode.ClockAligned);

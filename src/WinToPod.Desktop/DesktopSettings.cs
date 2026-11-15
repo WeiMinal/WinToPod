@@ -24,6 +24,7 @@ internal sealed record DesktopSettings
     public Dictionary<string, int> Volumes { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, int> UnmutedVolumes { get; init; } = new(StringComparer.Ordinal);
     public bool HideOnClose { get; set; }
+    public bool PreferReducedLatency { get; set; }
     public ApplicationAppearance WinUiAppearance { get; set; } = ApplicationAppearance.System;
     public string? CaptureEndpointId { get; set; }
     [System.Text.Json.Serialization.JsonRequired]

@@ -42,7 +42,7 @@ def check():
                 problems.append('Private/development marker: ' + rel)
     props = (ROOT / 'Directory.Build.props').read_text(encoding='utf-8')
     if '<Version>1.1.0</Version>' not in props: problems.append('Product version differs from V1.1')
-    retired = ['browser', 'src/WinToPod.Desktop/VideoPlayerSession.cs', 'src/WinToPod.Core/VideoPlayerArguments.cs', 'src/WinToPod.Core/VideoSyncBridge.cs']
+    retired = ['src/WinToPod.GlobalSyncLab', 'tests/WinToPod.GlobalSyncChecks', 'src/WinToPod.Core/GlobalSyncBridge.cs', 'browser', 'src/WinToPod.Desktop/VideoPlayerSession.cs', 'src/WinToPod.Core/VideoPlayerArguments.cs', 'src/WinToPod.Core/VideoSyncBridge.cs']
     for name in retired:
         if (ROOT / name).exists(): problems.append('Retired compensation component: ' + name)
     result = {'passed': not problems, 'public_files': len(files), 'problems': problems}

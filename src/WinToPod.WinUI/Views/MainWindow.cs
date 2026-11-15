@@ -32,7 +32,7 @@ internal sealed class MainWindow : Window, IPlaybackUi
         Title = "WinToPod"; SystemBackdrop = new MicaBackdrop();
         _root.Children.Add(_content); Content = _root;
         _native = new NativeWindow(this, WindowMessage);
-        _controller = new PlaybackController(settings, this, startup, enableGlobalSyncBridge: !preview, enableAutomation: !preview);
+        _controller = new PlaybackController(settings, this, startup, enableAutomation: !preview);
         _devices = new DevicePage(_controller, Run, OpenSettings, () => Run(ShowCaptureAsync), () => OpenSettingsPage("帮助与诊断")); _content.Content = _devices;
         _tray = new TrayIcon(_native.Handle, !preview);
         _notifications = new NotificationService(() => Post(ShowPanel), _tray, !preview);
@@ -222,21 +222,6 @@ internal sealed class MainWindow : Window, IPlaybackUi
         picker.FileTypeChoices.Add("ZIP 诊断包", new List<string> { ".zip" }); WinRT.Interop.InitializeWithWindow.Initialize(picker, _native.Handle);
         var file = await picker.PickSaveFileAsync(); if (file is not null) _controller.ExportDiagnostics(file.Path);
     }
-    public async Task OpenGlobalSyncAsync()
-    {
-        var executable = Path.Combine(AppContext.BaseDirectory, "全局补偿", "WinToPod.GlobalSyncLab.exe");
-        if (!File.Exists(executable))
-        {
-            await MessageAsync("缺少全局补偿组件", "请退出程序，将新版完整解压到空目录后启动。");
-            return;
-        }
-        if (!_controller.GlobalSyncAvailable)
-        {
-            await MessageAsync("全局补偿暂不可用", "本机状态接口未启动，请退出其他 WinToPod 实例后重试。");
-            return;
-        }
-        Process.Start(new ProcessStartInfo(executable) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(executable)! });
-    }
     private async Task QuitAsync()
     {
         if (_quitting) return; _quitting = true; CancelPrompts();
@@ -263,14 +248,14 @@ internal sealed class MainWindow : Window, IPlaybackUi
             OpenSettings();
             await Task.Delay(250);
             var labels = Walk(_root).OfType<TextBlock>().Select(t => t.Text).ToArray();
-            var unifiedEntry = labels.Contains("全局补偿") && !labels.Any(t => t is "浏览器补偿" or "本地视频" or "浏览器或本地视频");
-            OpenSettingsPage("全局补偿");
+            var audioEntry = labels.Contains("声音延迟") && !labels.Any(t => t is "全局补偿" or "浏览器补偿" or "本地视频" or "浏览器或本地视频");
+            OpenSettingsPage("声音延迟");
             await Task.Delay(250);
-            var globalPageRendered = _settings is { ActualHeight: > 0 } && Walk(_root).OfType<TextBlock>().Any(t => t.Text == "跨应用统一补偿");
+            var audioPageRendered = _settings is { ActualHeight: > 0 } && Walk(_root).OfType<TextBlock>().Any(t => t.Text == "系统声音缓冲");
             var report = new { Product = "WinToPod", Framework = typeof(Window).Assembly.GetName().Name, Ui = "WinUI 3", WindowsAppSdk = "2.5.1",
-                Passed = devicePageRendered && unifiedEntry && globalPageRendered, DevicePageRendered = devicePageRendered,
-                UnifiedGlobalEntry = unifiedEntry, GlobalPageRendered = globalPageRendered,
-                DesktopCaptureTested = false, Width = _root.ActualWidth, Height = _root.ActualHeight };
+                Passed = devicePageRendered && audioEntry && audioPageRendered, DevicePageRendered = devicePageRendered,
+                AudioLatencyEntry = audioEntry, AudioLatencyPageRendered = audioPageRendered,
+                AcousticLatencyMeasured = false, Width = _root.ActualWidth, Height = _root.ActualHeight };
             File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(report));
         }
         finally { await QuitAsync(); }

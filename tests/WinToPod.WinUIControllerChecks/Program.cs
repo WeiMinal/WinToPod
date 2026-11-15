@@ -9,11 +9,14 @@ var legacy = JsonSerializer.Deserialize<DesktopSettings>("""
     """)!;
 Check(legacy.Volumes["synthetic"] == 37 && legacy.SelectedReceiver == "synthetic" && !legacy.AutoConnectOnStart,
     "retiring player settings preserves receiver volume, selection and auto-connect preference");
+Check(!legacy.PreferReducedLatency, "legacy settings retain standard buffering by default");
+legacy.PreferReducedLatency = true;
 var saved = JsonSerializer.Serialize(legacy);
+Check(JsonSerializer.Deserialize<DesktopSettings>(saved)!.PreferReducedLatency, "reduced audio buffering preference survives a settings round trip");
 Check(!saved.Contains("VideoPlayerPath", StringComparison.Ordinal) && !saved.Contains("VideoCorrectionsMs", StringComparison.Ordinal),
     "retired player fields are discarded on save and never migrate to global delay");
 var ui = new FakeUi();
-var controller = new PlaybackController(new DesktopSettings(), ui, false, enableGlobalSyncBridge: false, enableAutomation: false);
+var controller = new PlaybackController(new DesktopSettings(), ui, false, enableAutomation: false);
 Check(ui.State is { Connected: false, Working: false, CanConnect: false } && ui.State.Entries.Count == 0, "UI controller starts offline without selecting or connecting a receiver");
 controller.Mute();
 Check(ui.State is { Volume: 20, Connected: false, Working: false }, "mute on a disconnected UI cannot start, disconnect or alter a session");

@@ -12,7 +12,7 @@ from receiver_simulator import Peer
 async def main():
     dotnet, assembly = sys.argv[1:3]
     results = []
-    for mode in ['calibrated-exact', 'calibrated-rounded', 'setup-rejected', 'fallback-setup-rejected', 'in-session-test', 'normal', 'no-clock', 'reject-stream', 'interrupt', 'clock-loss', 'volume-reject', 'volume-change', 'reject-auth',
+    for mode in ['latency-reduced', 'latency-clamped', 'latency-missing', 'latency-conflict', 'calibrated-exact', 'calibrated-rounded', 'setup-rejected', 'fallback-setup-rejected', 'in-session-test', 'normal', 'no-clock', 'reject-stream', 'interrupt', 'clock-loss', 'volume-reject', 'volume-change', 'reject-auth',
                  'fallback-accept', 'fallback-decline', 'fallback-cancel', 'fallback-volume-reject', 'fallback-remembered',
                  'password-required', 'password-cancel', 'password-cancel-token', 'password-supplied', 'password-both', 'password-live-only',
                  'no-password', 'wrong-password', 'wrong-password-no-delay', 'fallback-wrong-password', 'fallback-wrong-password-no-delay',
@@ -34,6 +34,14 @@ async def main():
         if mode in ['wrong-password-no-delay', 'fallback-wrong-password-no-delay']:
             secondary_mode = 'ptp-native-wrong-password-no-delay'
         peers = [Peer(leader_mode, '127.0.0.2'), Peer(secondary_mode, '127.0.0.3')]
+        if mode.startswith('latency-'):
+            peers[0].latency_fields = {'latencyMin': 11025, 'latencyMax': 88200}
+            peers[1].latency_fields = {'latencyMin': 11025, 'latencyMax': 88200}
+            if mode == 'latency-clamped': peers[1].latency_fields['latencyMin'] = 44100
+            if mode == 'latency-missing': peers[1].latency_fields = {}
+            if mode == 'latency-conflict':
+                peers[0].latency_fields['latencyMax'] = 22050
+                peers[1].latency_fields['latencyMin'] = 44100
         peers[1].requires_password = mode != 'no-password'
         peers[1].pairing_password = 'demo-secondary-secret' if mode != 'no-password' else None
         peers[1].bad_m6_signature = mode == 'bad-m6-signature'
@@ -113,7 +121,7 @@ async def main():
             assert primary.sender_clock == secondary.sender_clock
             assert all(p.setup_payload['isMultiSelectAirPlay'] for p in peers)
             assert 'SET_PARAMETER /session' not in secondary.methods and 'GET_PARAMETER /session' not in secondary.methods
-            if mode in ['no-clock', 'reject-stream', 'volume-reject']:
+            if mode in ['latency-conflict', 'no-clock', 'reject-stream', 'volume-reject']:
                 assert all(p.audio_packets == 0 for p in peers), 'Partial group emitted audio'
                 if mode != 'volume-reject':
                     assert 'SET_PARAMETER /session' not in primary.methods
@@ -151,7 +159,7 @@ async def main():
                 assert len(primary.pairing_client_ids) == 2 and len(secondary.pairing_client_ids) == 5, 'Live test re-authenticated'
             results.append({'mode': 'native-pair-' + mode, 'passed': True,
                             'member_packets': [p.audio_packets for p in peers], 'distinct_keys': True,
-                            'shared_stereo_and_anchor': mode not in ['no-clock', 'reject-stream', 'volume-reject']})
+                            'shared_stereo_and_anchor': mode not in ['latency-conflict', 'no-clock', 'reject-stream', 'volume-reject']})
             print(mode + ': passed', file=sys.stderr)
         finally:
             for peer in peers:

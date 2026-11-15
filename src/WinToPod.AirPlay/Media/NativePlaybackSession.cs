@@ -19,6 +19,7 @@ public sealed class NativePlaybackSession : IAsyncDisposable
     public long Retransmits => _members.Sum(m => m.Retransmits);
     public long[] MemberPackets => _members.Select(m => m.PacketsSent).ToArray();
     public int LatencyFrames => (int)_members.Max(m => m.Latency);
+    public AudioLatencyReport[] LatencyReports => _members.Select(m => m.LatencyReport).ToArray();
     public int MemberCount => _members.Count;
     public bool IsSingleFallback { get; private set; }
     public int? LastConfirmedVolume => _members.FirstOrDefault()?.LastConfirmedVolume;
@@ -37,6 +38,8 @@ public sealed class NativePlaybackSession : IAsyncDisposable
             throw new ArgumentException("组合成员必须使用同一发送端身份。", nameof(members));
         if (members.Select(m => m.VolumeCurve).Distinct().Count() != 1)
             throw new ArgumentException("组合成员必须使用同一音量映射。", nameof(members));
+        if (members.Select(m => m.LatencyMode).Distinct().Count() != 1)
+            throw new ArgumentException("组合成员必须使用同一缓冲策略。", nameof(members));
         using var memory = pairingStore is null ? new MemoryReceiverPairingStore() : null;
         var store = pairingStore ?? memory!;
         var cohort = members.Count == 2 ? new PlaybackCohort(members) : null;
@@ -96,6 +99,9 @@ public sealed class NativePlaybackSession : IAsyncDisposable
                         fallback.IsSingleFallback = true; return fallback;
                     }
                 }
+                var commonLatency = AudioLatencyPolicy.SelectGroup(session.LatencyReports);
+                for (var i = 0; i < session._members.Count; i++) session._members[i].ApplyLatency(commonLatency[i]);
+                diagnostic?.Invoke($"组合共同发送端提前量：{commonLatency[0].SelectedFrames}样本；原因={commonLatency[0].Decision}；尚非实测声学延迟。");
                 progress?.Invoke("正在确认两只音箱的共同时间轴……");
                 await cohort.GetClock(diagnostic).WaitUntilReadyAsync(cancellation).ConfigureAwait(false);
                 cohort.ThrowIfFailed();

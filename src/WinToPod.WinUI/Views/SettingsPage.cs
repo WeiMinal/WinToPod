@@ -17,10 +17,10 @@ internal sealed class SettingsPage : Grid
     private readonly Dictionary<string, UIElement> _pages = new();
     private readonly Stack<string> _history = new();
     private string _current = "设置";
-    private TextBlock? _globalSync, _testHint, _connectionSummary, _appearanceSummary;
-    private Button? _test, _openGlobalSync;
+    private TextBlock? _audioLatency, _testHint, _connectionSummary, _appearanceSummary;
+    private Button? _test;
     private RadioButtons? _policy;
-    private ToggleSwitch? _startup, _auto, _hide, _single;
+    private ToggleSwitch? _startup, _auto, _hide, _single, _reducedLatency;
     private Preferences _saved;
     private bool _initializing = true;
 
@@ -29,7 +29,7 @@ internal sealed class SettingsPage : Grid
         _controller = controller; _window = window; _run = run; _back = back;
         var s = controller.Settings;
         _saved = new(s.Policy, StartupRegistration.IsCurrent, s.AutoConnectOnStart, s.HideOnClose,
-            controller.Selection?.IsGroup == true && s.SingleFallbackTargets.Contains(controller.Selection.Key));
+            controller.Selection?.IsGroup == true && s.SingleFallbackTargets.Contains(controller.Selection.Key), s.PreferReducedLatency);
         Margin = new Thickness(24, 8, 24, 16); RowSpacing = 8;
         RowDefinitions.Add(new() { Height = Ui.Auto }); RowDefinitions.Add(new() { Height = Ui.Star }); RowDefinitions.Add(new() { Height = Ui.Auto });
         var header = Ui.Row(10); _backButton = Ui.IconButton("\uE72B", "返回音箱", GoBack); header.Children.Add(_backButton); header.Children.Add(_title);
@@ -53,7 +53,7 @@ internal sealed class SettingsPage : Grid
             var initializing = _initializing; _initializing = true;
             try
             {
-                view = name switch { "设置" => Home(), "外观" => Appearance(), "连接与播放" => Connection(), "全局补偿" => GlobalSync(), "帮助与诊断" => Diagnostic(), "关于" => About(), _ => throw new ArgumentOutOfRangeException(nameof(name)) };
+                view = name switch { "设置" => Home(), "外观" => Appearance(), "连接与播放" => Connection(), "声音延迟" => AudioLatency(), "帮助与诊断" => Diagnostic(), "关于" => About(), _ => throw new ArgumentOutOfRangeException(nameof(name)) };
                 _pages.Add(name, view);
             }
             finally { _initializing = initializing; }
@@ -77,7 +77,7 @@ internal sealed class SettingsPage : Grid
         column.Children.Add(Ui.Card(NavigationRow("外观", AppearanceName(_controller.Settings.WinUiAppearance), () => Navigate("外观"), out _appearanceSummary), new Thickness(4)));
         var playback = Ui.Column(2);
         var connection = NavigationRow("连接与播放", "", () => Navigate("连接与播放"), out var summary); _connectionSummary = summary; playback.Children.Add(connection);
-        playback.Children.Add(NavigationRow("全局补偿", "跨应用画面延后 · 实验功能", () => Navigate("全局补偿"), out _));
+        playback.Children.Add(NavigationRow("声音延迟", "系统声音缓冲 · 实验选项", () => Navigate("声音延迟"), out _));
         column.Children.Add(Ui.Card(playback, new Thickness(4)));
         var support = Ui.Column(2);
         support.Children.Add(NavigationRow("帮助与诊断", "声音检查、连接记录", () => Navigate("帮助与诊断"), out _));
@@ -148,23 +148,21 @@ internal sealed class SettingsPage : Grid
         Ui.Label(toggle, title); toggle.Toggled += (_, _) => Save(); Ui.Add(row, toggle, 1); parent.Children.Add(row); return toggle;
     }
     private Preferences CurrentPreferences() => new(_policy is null ? _saved.Policy : _policy.SelectedIndex == 1 ? ConnectionPolicy.Aggressive : ConnectionPolicy.Conservative,
-        _startup?.IsOn ?? _saved.StartAtLogin, _auto?.IsOn ?? _saved.AutoConnect, _hide?.IsOn ?? _saved.HideOnClose, _single?.IsOn ?? _saved.PreferSingle);
+        _startup?.IsOn ?? _saved.StartAtLogin, _auto?.IsOn ?? _saved.AutoConnect, _hide?.IsOn ?? _saved.HideOnClose, _single?.IsOn ?? _saved.PreferSingle, _reducedLatency?.IsOn ?? _saved.PreferReducedLatency);
     private void Save()
     {
         if (_initializing) return;
         var draft = CurrentPreferences(); if (draft == _saved) return;
         _run(async () => { await _controller.SavePreferencesAsync(draft); _saved = draft; _feedback.Text = "已保存"; Refresh(); });
     }
-    private UIElement GlobalSync()
+    private UIElement AudioLatency()
     {
         var column = Ui.Column(14);
-        column.Children.Add(Ui.Text("跨应用统一补偿", 16, true));
-        column.Children.Add(Ui.Hint("延后所选显示器的画面，适用于普通桌面应用。当前为观看实验，画质上限960×540、约15fps；不会降低音频延迟。"));
-        _globalSync = Ui.Hint(""); column.Children.Add(_globalSync);
-        _openGlobalSync = Ui.Button("打开全局补偿实验", () => _run(_window.OpenGlobalSyncAsync));
-        column.Children.Add(_openGlobalSync);
-        column.Children.Add(Ui.Hint("在实验窗口选择显示器并开始，可微调延后时间。操作电脑前按 Ctrl+Alt+F8 恢复实时画面；鼠标操作仍作用于实时桌面。"));
-        column.Children.Add(Ui.Hint("画面只在内存中缓存，不保存、不上传。受保护内容、HDR及独占全屏尚不支持。"));
+        column.Children.Add(Ui.Text("系统声音缓冲", 16, true));
+        _reducedLatency = SwitchRow(column, "较低缓冲（实验）", CurrentPreferences().PreferReducedLatency,
+            "作用于全部系统声音。请先断开音箱再更改，重新连接后生效。");
+        column.Children.Add(Ui.Hint("尝试缩短声音等待时间，网络波动时可能更容易卡顿。若出现无声或断续，请关闭此选项后重连。当前尚未证明适合游戏或通话。"));
+        _audioLatency = Ui.Hint(""); column.Children.Add(_audioLatency);
         return Scroll(column);
     }
     private UIElement Diagnostic()
@@ -200,14 +198,8 @@ internal sealed class SettingsPage : Grid
     {
         if (_appearanceSummary is not null) _appearanceSummary.Text = AppearanceName(_controller.Settings.WinUiAppearance);
         if (_connectionSummary is not null) _connectionSummary.Text = (_policy?.SelectedIndex == 1 || _policy is null && _saved.Policy == ConnectionPolicy.Aggressive) ? "激进模式" : "保守模式（推荐）";
-        if (_globalSync is not null)
-        {
-            var state = _controller.GlobalTiming;
-            _globalSync.Text = !_controller.GlobalSyncAvailable ? "本机状态接口不可用。" : state.Connected
-                ? $"音箱已连接 · 建议延后 {state.DelayMs}ms（协议与采集估算，非实测声学延迟）"
-                : "请先连接音箱，再开始全局补偿实验。";
-        }
-        if (_openGlobalSync is not null) _openGlobalSync.IsEnabled = _controller.GlobalSyncAvailable;
+        if (_audioLatency is not null) _audioLatency.Text = _controller.AudioLatencyDescription;
+        if (_reducedLatency is not null) _reducedLatency.IsEnabled = !_controller.Working && !_controller.Connected;
         if (_test is not null && _testHint is not null)
         {
             var state = _controller.SoundTestState(); _testHint.Text = state.Description;

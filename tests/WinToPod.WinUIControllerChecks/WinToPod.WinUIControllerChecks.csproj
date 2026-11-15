@@ -6,6 +6,6 @@
     <ProjectReference Include="../../src/WinToPod.Core/WinToPod.Core.csproj" />
     <ProjectReference Include="../../src/WinToPod.AirPlay/WinToPod.AirPlay.csproj" />
     <Compile Include="../../src/WinToPod.WinUI/Controller/*.cs" Link="Controller/%(Filename)%(Extension)" />
-    <Compile Include="../../src/WinToPod.Desktop/AudioSources.cs;../../src/WinToPod.Desktop/ProcessAudioCapture.cs;../../src/WinToPod.Desktop/EndpointVolumeLink.cs;../../src/WinToPod.Desktop/DesktopSettings.cs;../../src/WinToPod.Desktop/DesktopPairingStore.cs;../../src/WinToPod.Desktop/DesktopPlaybackCredentialStore.cs;../../src/WinToPod.Desktop/VideoPlayerSession.cs;../../src/WinToPod.Desktop/LocalUseMonitor.cs;../../src/WinToPod.Desktop/FrontendState.cs" Link="Services/%(Filename)%(Extension)" />
+    <Compile Include="../../src/WinToPod.Desktop/AudioSources.cs;../../src/WinToPod.Desktop/ProcessAudioCapture.cs;../../src/WinToPod.Desktop/EndpointVolumeLink.cs;../../src/WinToPod.Desktop/DesktopSettings.cs;../../src/WinToPod.Desktop/DesktopPairingStore.cs;../../src/WinToPod.Desktop/DesktopPlaybackCredentialStore.cs;../../src/WinToPod.Desktop/LocalUseMonitor.cs;../../src/WinToPod.Desktop/FrontendState.cs" Link="Services/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

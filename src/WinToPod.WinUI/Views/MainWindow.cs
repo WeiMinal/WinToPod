@@ -32,7 +32,7 @@ internal sealed class MainWindow : Window, IPlaybackUi
         Title = "WinToPod"; SystemBackdrop = new MicaBackdrop();
         _root.Children.Add(_content); Content = _root;
         _native = new NativeWindow(this, WindowMessage);
-        _controller = new PlaybackController(settings, this, startup, enableVideoBridge: !preview, enableAutomation: !preview);
+        _controller = new PlaybackController(settings, this, startup, enableGlobalSyncBridge: !preview, enableAutomation: !preview);
         _devices = new DevicePage(_controller, Run, OpenSettings, () => Run(ShowCaptureAsync), () => OpenSettingsPage("帮助与诊断")); _content.Content = _devices;
         _tray = new TrayIcon(_native.Handle, !preview);
         _notifications = new NotificationService(() => Post(ShowPanel), _tray, !preview);
@@ -222,35 +222,20 @@ internal sealed class MainWindow : Window, IPlaybackUi
         picker.FileTypeChoices.Add("ZIP 诊断包", new List<string> { ".zip" }); WinRT.Interop.InitializeWithWindow.Initialize(picker, _native.Handle);
         var file = await picker.PickSaveFileAsync(); if (file is not null) _controller.ExportDiagnostics(file.Path);
     }
-    public async Task OpenBrowserHelperAsync()
+    public async Task OpenGlobalSyncAsync()
     {
-        var folder = Path.Combine(AppContext.BaseDirectory, "浏览器音画补偿");
-        if (!Directory.Exists(folder)) { await MessageAsync("需要完整程序文件夹", "请完整解压 WinToPod，再从文件夹内启动。"); return; }
-        Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
-        await MessageAsync("首次安装浏览器助手", "在 Edge 或 Chrome 的扩展管理中开启开发人员模式，选择“加载解压缩的扩展”，选中刚打开的文件夹。\n\n首次授权后自动跟随音箱。旧助手请重新加载。");
-    }
-    public async Task ShowVideoToolsAsync()
-    {
-        var column = Ui.Column(); column.Children.Add(Ui.Hint("使用 VLC / mpv 播放本地视频，自动跟随当前音箱的补偿。"));
-        var feedback = Ui.Hint(""); var open = Ui.Button("打开本地视频", () => Run(async () =>
+        var executable = Path.Combine(AppContext.BaseDirectory, "全局补偿", "WinToPod.GlobalSyncLab.exe");
+        if (!File.Exists(executable))
         {
-            var player = new[] { _controller.Settings.VideoPlayerPath, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "VideoLAN", "VLC", "vlc.exe") }.FirstOrDefault(p => p is not null && File.Exists(p));
-            if (player is null) player = await PickFileAsync("选择 VLC 或 mpv", new[] { ".exe" });
-            if (player is null) return;
-            if (Path.GetFileName(player).ToLowerInvariant() is not ("vlc.exe" or "mpv.exe")) { feedback.Text = "请选择 vlc.exe 或 mpv.exe。"; return; }
-            var media = await PickFileAsync("选择本地视频", new[] { ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ts" });
-            if (media is not null) { await _controller.LaunchVideoAsync(player, media); feedback.Text = "已启动兼容播放，请按人物口型检查补偿效果。"; }
-        })); open.IsEnabled = _controller.Connected; column.Children.Add(open);
-        var correction = new NumberBox { Header = "高级微调（毫秒）", Minimum = -1500, Maximum = 1500, SmallChange = 50, Value = _controller.VideoCorrection, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
-        var advanced = Ui.Column(10); advanced.Children.Add(correction); advanced.Children.Add(Ui.Hint("默认无需调整。正数让画面更晚，负数更早。"));
-        advanced.Children.Add(Ui.Button("保存微调", () => { if (!double.IsNaN(correction.Value)) { _controller.SetVideoCorrection((int)correction.Value); feedback.Text = "微调已保存。"; } }));
-        column.Children.Add(new Expander { Header = "画面仍不同步？", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch }); column.Children.Add(feedback);
-        await DialogAsync(new ContentDialog { Title = "本地视频", Content = column, CloseButtonText = "完成" });
-    }
-    private async Task<string?> PickFileAsync(string title, IEnumerable<string> types)
-    {
-        var picker = new FileOpenPicker { ViewMode = PickerViewMode.List }; foreach (var type in types) picker.FileTypeFilter.Add(type);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, _native.Handle); return (await picker.PickSingleFileAsync())?.Path;
+            await MessageAsync("缺少全局补偿组件", "请退出程序，将新版完整解压到空目录后启动。");
+            return;
+        }
+        if (!_controller.GlobalSyncAvailable)
+        {
+            await MessageAsync("全局补偿暂不可用", "本机状态接口未启动，请退出其他 WinToPod 实例后重试。");
+            return;
+        }
+        Process.Start(new ProcessStartInfo(executable) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(executable)! });
     }
     private async Task QuitAsync()
     {
@@ -268,7 +253,24 @@ internal sealed class MainWindow : Window, IPlaybackUi
         await Task.Delay(250);
         try
         {
-            var report = new { Product = "WinToPod", Framework = typeof(Window).Assembly.GetName().Name, Ui = "WinUI 3", WindowsAppSdk = "2.5.1", Passed = _root.ActualWidth > 0 && _devices.ActualHeight > 0, Width = _root.ActualWidth, Height = _root.ActualHeight };
+            var devicePageRendered = _root.ActualWidth > 0 && _devices.ActualHeight > 0;
+            static IEnumerable<DependencyObject> Walk(DependencyObject element)
+            {
+                yield return element;
+                for (var index = 0; index < VisualTreeHelper.GetChildrenCount(element); index++)
+                    foreach (var child in Walk(VisualTreeHelper.GetChild(element, index))) yield return child;
+            }
+            OpenSettings();
+            await Task.Delay(250);
+            var labels = Walk(_root).OfType<TextBlock>().Select(t => t.Text).ToArray();
+            var unifiedEntry = labels.Contains("全局补偿") && !labels.Any(t => t is "浏览器补偿" or "本地视频" or "浏览器或本地视频");
+            OpenSettingsPage("全局补偿");
+            await Task.Delay(250);
+            var globalPageRendered = _settings is { ActualHeight: > 0 } && Walk(_root).OfType<TextBlock>().Any(t => t.Text == "跨应用统一补偿");
+            var report = new { Product = "WinToPod", Framework = typeof(Window).Assembly.GetName().Name, Ui = "WinUI 3", WindowsAppSdk = "2.5.1",
+                Passed = devicePageRendered && unifiedEntry && globalPageRendered, DevicePageRendered = devicePageRendered,
+                UnifiedGlobalEntry = unifiedEntry, GlobalPageRendered = globalPageRendered,
+                DesktopCaptureTested = false, Width = _root.ActualWidth, Height = _root.ActualHeight };
             File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(report));
         }
         finally { await QuitAsync(); }

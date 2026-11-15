@@ -9,9 +9,8 @@ namespace WinToPod.Desktop;
 internal sealed class LoopbackAudioSource : IDisposable
 {
     private WasapiLoopbackCapture? _capture;
-    private ProcessAudioCapture? _processCapture, _playerCapture;
-    private readonly PcmBuffer _playerBuffer = new();
-    private readonly ClockAlignedPcmBuffer? _rateBuffer, _playerRateBuffer;
+    private ProcessAudioCapture? _processCapture;
+    private readonly ClockAlignedPcmBuffer? _rateBuffer;
     public CaptureRateSnapshot? RateSnapshot => _rateBuffer?.Snapshot;
     public string CaptureMode { get; private set; } = "endpoint";
     public string? CaptureFallback { get; private set; }
@@ -32,7 +31,7 @@ internal sealed class LoopbackAudioSource : IDisposable
     public LoopbackAudioSource(string? endpointId) : this(endpointId, true) { }
     private LoopbackAudioSource(string? endpointId, bool startEndpoint, bool clockAligned = false)
     {
-        if (clockAligned) { _rateBuffer = new(); _playerRateBuffer = new(); }
+        if (clockAligned) _rateBuffer = new();
         using var enumerator = new MMDeviceEnumerator();
         _device = string.IsNullOrEmpty(endpointId) ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia) : enumerator.GetDevice(endpointId);
         try { if (startEndpoint) StartEndpoint(); } catch { _device.Dispose(); throw; }
@@ -82,33 +81,16 @@ internal sealed class LoopbackAudioSource : IDisposable
             _lastCaptureTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
         }
     }
-    public async Task IncludePlayerAsync(uint processId, CancellationToken cancellation)
-    {
-        if (_processCapture is null || _disposed) return;
-        _playerCapture?.Dispose(); _playerCapture = null; _playerBuffer.Clear(); _playerRateBuffer?.Clear();
-        // The main mix excludes this app's process tree. Explicitly include the
-        // player we launch, without duplicating unrelated apps or adding gain.
-        _playerCapture = await ProcessAudioCapture.OpenAsync((bytes, gap) => { if (_disposed) return; if (_playerRateBuffer is { } rate) { if (gap) rate.Clear(); rate.Write(bytes); } else _playerBuffer.Write(bytes); }, e => Interlocked.CompareExchange(ref _error, e, null), cancellation, processId);
-    }
     public ValueTask ReadAsync(Memory<byte> destination, CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();
         if (_error is not null) throw new IOException("Windows系统声音采集已中断。", _error);
         lock (_timingGate) { if (_lastCaptureTimestamp != 0) _captureDelay.Observe(BufferedFrames, System.Diagnostics.Stopwatch.GetElapsedTime(_lastCaptureTimestamp).TotalMilliseconds); if (_rateBuffer is { } rate) rate.Read(destination.Span); else _buffer.Read(destination.Span); }
-        if (_playerCapture is not null)
-        {
-            var extra = new byte[destination.Length]; if (_playerRateBuffer is { } rate) rate.Read(extra); else _playerBuffer.Read(extra);
-            for (var i = 0; i + 1 < extra.Length; i += 2)
-            {
-                var mixed = BinaryPrimitives.ReadInt16LittleEndian(destination.Span[i..]) + BinaryPrimitives.ReadInt16LittleEndian(extra.AsSpan(i));
-                BinaryPrimitives.WriteInt16LittleEndian(destination.Span[i..], (short)Math.Clamp(mixed, short.MinValue, short.MaxValue));
-            }
-        }
         return ValueTask.CompletedTask;
     }
     public void Dispose()
     {
         if (_disposed) return; _disposed = true;
-        _processCapture?.Dispose(); _playerCapture?.Dispose(); _capture?.StopRecording(); _capture?.Dispose(); _device.Dispose(); _buffer.Clear(); _playerBuffer.Clear(); _rateBuffer?.Clear(); _playerRateBuffer?.Clear();
+        _processCapture?.Dispose(); _capture?.StopRecording(); _capture?.Dispose(); _device.Dispose(); _buffer.Clear(); _rateBuffer?.Clear();
     }
 }

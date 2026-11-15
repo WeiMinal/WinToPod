@@ -31,7 +31,7 @@ def main():
         ('checks', [args.dotnet, 'run', '--project', 'src/WinToPod.Checks', '-c', 'Release', '--no-build']),
         ('source', ['python', 'tools/CheckSource.py']),
         ('automatic', [args.dotnet, assembly, '--test-automatic-connection']),
-        ('video', [args.dotnet, assembly, '--test-video-sync']),
+        ('global-sync', [args.dotnet, assembly, '--test-global-sync']),
     ]
     for script in ['receiver_simulator', 'native_pair_simulator', 'playback_digest_simulator', 'stability_simulator']:
         tree = ast.parse((root / 'tests' / (script + '.py')).read_text(encoding='utf-8'))

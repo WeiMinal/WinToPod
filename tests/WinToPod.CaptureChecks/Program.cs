@@ -52,16 +52,6 @@ using (var source = await LoopbackAudioSource.OpenAsync(null, CancellationToken.
         if (!frame.SequenceEqual(output)) throw new Exception("Source samples followed master volume.");
     }
     processChecks.Add("pre-master application samples stay identical at 1/8/16/20/50/100 percent");
-    await source.IncludePlayerAsync(123, CancellationToken.None);
-    process.Emit(frame); ProcessAudioCapture.Instances.Last().Emit(new byte[4]); var merged = new byte[4]; await source.ReadAsync(merged, CancellationToken.None);
-    if (!frame.SequenceEqual(merged)) throw new Exception("Player inclusion duplicated desktop audio.");
-    processChecks.Add("including an app-launched player does not double the desktop mix");
-    process.Emit([0, 0, 0, 0]); ProcessAudioCapture.Instances.Last().Emit(frame); await source.ReadAsync(merged, CancellationToken.None);
-    if (!frame.SequenceEqual(merged)) throw new Exception("App-launched player is inaudible.");
-    processChecks.Add("app-launched player remains audible through a dedicated include-tree stream");
-    process.Emit([0xFF, 0x7F, 0, 0x80]); ProcessAudioCapture.Instances.Last().Emit([0xFF, 0x7F, 0, 0x80]); await source.ReadAsync(merged, CancellationToken.None);
-    if (!merged.SequenceEqual(new byte[] { 0xFF, 0x7F, 0, 0x80 })) throw new Exception("Independent source mix overflow wrapped.");
-    processChecks.Add("independent mix clips safely instead of integer wrap");
 }
 using (var source = await LoopbackAudioSource.OpenAsync(null, default, requirePreMaster: true, clockAligned: true))
 {

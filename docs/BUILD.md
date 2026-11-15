@@ -14,7 +14,7 @@ python tools/Package.py
 
 `artifacts/win-x64` 是每次重新创建的便携目录，根目录只保留 `WinToPod.exe`、`app` 和使用说明；`artifacts/release` 包含运行包、对应源码和 SHA256。`artifacts/validation` 存放实际检查报告，打包不采纳旧版验证结论。
 
-`-WindowsSelfCheck` 从根目录启动器启动合成界面，验证 WinUI 资源加载与可见布局，不搜索或连接音箱，不采集系统声音。真实采集、DPAPI、任务栏主题、弹窗置顶和多屏 DPI 仍需 Windows 实机验证。
+`-WindowsSelfCheck` 从根目录启动器启动合成界面，验证 WinUI 资源加载、设置的全局统一入口及全局设置页面可见布局，不搜索或连接音箱，不采集系统声音。真实采集、DPAPI、任务栏主题、弹窗置顶和多屏 DPI 仍需 Windows 实机验证。
 
 GitHub 工作流在推送/PR 时构建、检查并上传产物。main 推送更改产品版本后，检查成功才创建对应 GitHub Release；标题和四条说明取自 `docs/RELEASE.md`。发布先创建草稿、上传文件，再公开，失败不会公开缺少附件的 Release。V1.0 历史标签与附件不变。
 
@@ -31,15 +31,14 @@ python tests/stability_simulator.py dotnet src/WinToPod.Checks/bin/Release/net10
 
 按顺序执行，模拟器共享回环 PTP 端口 31319/31320。生产端口仍为 319/320。稳定性默认约 11 分钟，缩短执行不能算长期验证。V1.1 云端完整推流模拟存在 PTP/调度保护触发，不能视为全部通过，见 [验证范围](TESTING.md)。
 
-## 可选检查
+## 全局补偿检查
 
 ```sh
-npm install --prefix tests
-node tests/video_sync_companion.mjs
-npx --prefix tests playwright install chromium
-node tests/video_sync_browser.mjs
+dotnet run --project src/WinToPod.Checks -c Release -- --test-global-sync
+dotnet run --project tests/WinToPod.GlobalSyncChecks -c Release
 ```
 
-浏览器测试使用本机生成视频，不登录真实账号。图标重建使用 `tools/BuildBrand.py` 和 `tools/requirements.txt`，无需重新生成设计。
+Build.ps1 同时构建独立全局实验进程到 `app/全局补偿`，执行状态接口和帧队列检查。打包检查要求组件与自包含运行时完整，拒绝旧浏览器目录；从主程序设置打开组件。主界面仍为WinUI 3，只有实验进程依赖Windows Forms。
+浏览器扩展、播放器遥控与对应npm/测试视频依赖已移除。图标重建使用 `tools/BuildBrand.py` 和 `tools/requirements.txt`。
 
 Linux 可交叉编译 WinUI 和 C 启动器，但不能运行 Windows 界面。Windows App SDK 的 Windows 资源工具需要适配；正式 CI 使用 Windows 原生工具链。不得用交叉编译或替代边界测试冒充 Windows/HomePod 实测。

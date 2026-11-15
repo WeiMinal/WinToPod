@@ -34,10 +34,7 @@ internal sealed class PlaybackController : IAsyncDisposable
     private readonly ActionState _connect = new("连接音箱"), _singleFallback = new("先用一只播放");
     private readonly StatusState _status = new("双击音箱或点击连接。");
     private readonly VolumeState _volume = new();
-    private VideoSyncBridge? _videoBridge;
-    private VideoPlayerSession? _videoPlayer;
-    private int _lastVideoDelay = -1;
-    private readonly SemaphoreSlim _videoUpdateGate = new(1, 1);
+    private GlobalSyncBridge? _globalSyncBridge;
 
     private readonly IUiTimer _stats, _volumeDebounce;
     private readonly SemaphoreSlim _preferencesGate = new(1, 1);
@@ -63,7 +60,7 @@ internal sealed class PlaybackController : IAsyncDisposable
     private string? _activeKey, _linkedEndpointId;
     private bool _loading = true, _exiting, _applyingVolume, _stateFailed, _working;
 
-    public PlaybackController(DesktopSettings settings, IPlaybackUi ui, bool startup, bool enableVideoBridge = true, bool enableAutomation = true)
+    public PlaybackController(DesktopSettings settings, IPlaybackUi ui, bool startup, bool enableGlobalSyncBridge = true, bool enableAutomation = true)
     {
         _ui = ui; _enableAutomation = enableAutomation;
         _automation = new(settings.Policy, settings.AutoConnectOnStart, settings.LastConnectedReceiver);
@@ -83,8 +80,8 @@ internal sealed class PlaybackController : IAsyncDisposable
         };
         _volumeDebounce.Tick += async () => { _volumeDebounce.Stop(); await ApplyVolumeAsync(); };
         _volumePoll.Tick += async () => await PullVolumeAsync();
-        if (enableVideoBridge) try { _videoBridge = new(); } catch (SocketException) { Log("浏览器音画补偿端口不可用，本地播放器功能仍可使用。"); }
-        _stats.Tick += async () => { UpdateStats(); await UpdateVideoSyncAsync(); await PumpAutomaticAsync(); };
+        if (enableGlobalSyncBridge) try { _globalSyncBridge = new(); } catch (SocketException) { Log("全局补偿状态接口不可用；声音推送仍可使用。"); }
+        _stats.Tick += async () => { UpdateStats(); UpdateGlobalSync(); await PumpAutomaticAsync(); };
         _loading = false; UpdateActions();
         Log("WinToPod V1.1 · WinUI 3");
     }
@@ -345,7 +342,7 @@ internal sealed class PlaybackController : IAsyncDisposable
             _session = session; RememberVolume(row.Key, session.LastConfirmedVolume!.Value);
             if (_activeSingleFallback && rememberFallback) _settings.SingleFallbackTargets.Add(row.Key);
             Log(_activeSingleFallback ? "当前模式：单只兼容播放；仅主成员一条音频链路，左右声道合并。" : row.IsGroup ? "当前模式：双成员原生立体声。" : "当前模式：单个AirPlay设备。");
-            Log($"协商音频缓冲：{session.LatencyFrames}采样 / {VideoSyncState.FromFrames(session.LatencyFrames)}毫秒；这是协议估算，不是实测声学延迟。");
+            Log($"协商音频缓冲：{session.LatencyFrames}采样 / {GlobalSyncState.FromFrames(session.LatencyFrames)}毫秒；这是协议估算，不是实测声学延迟。");
             SetDisplayedVolume(session.LastConfirmedVolume.Value);
             _settings.Interrupted = false; _settings.NoticeDismissed = false; _settings.InterruptedReceiver = null; _settings.InterruptionReason = "unknown";
             if (!TrySaveSettings()) throw new IOException("音量已确认但设置无法保存，已停止发送声音。");
@@ -355,7 +352,6 @@ internal sealed class PlaybackController : IAsyncDisposable
             _settings.WinUiPreMasterTargets.Add(row.Key);
             if (!TrySaveSettings()) throw new IOException("采集偏好无法保存，已停止推流。");
             Log("采集路径：" + _audio.CaptureMode + (_audio.CaptureFallback is null ? "" : "；兼容回退=" + _audio.CaptureFallback));
-            if (_videoPlayer is { HasExited: false }) await _audio.IncludePlayerAsync(_videoPlayer.ProcessId, cancellation);
             AttachVolumeLink(_audio.EndpointId); _volumePoll.Start();
             await Task.Delay(120, cancellation); Log(_clockAligned ? "已启用V1.2时钟对齐与采集率补偿试验；由音箱控制播放音量。" : "开始推送电脑声音；采集样本保持原样，由音箱控制播放音量，不采集麦克风。");
             SetStatus(_activeSingleFallback ? $"单只兼容播放 · {receiver.Name}。左右声道已合并，原生组合保留。" : "正在推送电脑声音。");
@@ -386,7 +382,7 @@ internal sealed class PlaybackController : IAsyncDisposable
         }
         finally
         {
-            _soundTest.Reset(); DetachVolumeLink(); _session = null; await UpdateVideoSyncAsync(waitForPrior: true);
+            _soundTest.Reset(); DetachVolumeLink(); _session = null; UpdateGlobalSync();
 #if WINDOWS
             await metadataStop.CancelAsync();
             if (metadataTask is not null) await metadataTask;
@@ -445,7 +441,7 @@ internal sealed class PlaybackController : IAsyncDisposable
         if (userInitiated) _automation.Pause();
         _soundTest.Reset(); DetachVolumeLink(); _scanCancel?.Cancel(); _sessionCancel?.Cancel(); _ui.CancelPrompts();
         if (_sessionTask is not null) { _connect.Enabled = false; SetStatus("正在断开……"); }
-        await UpdateVideoSyncAsync(waitForPrior: true);
+        UpdateGlobalSync();
         if (_sessionTask is { } task) { _connect.Enabled = false; SetStatus("正在断开……"); await task; }
     }
     private async Task ApplyVolumeAsync()
@@ -589,7 +585,7 @@ internal sealed class PlaybackController : IAsyncDisposable
     {
         _automation.Interrupted(key);
         DetachVolumeLink();
-        _videoBridge?.Update(VideoSyncState.Offline);
+        _globalSyncBridge?.Update(GlobalSyncState.Offline);
         var pending = _settings.Interrupted && _settings.InterruptedReceiver == key;
         _settings.Interrupted = true; _settings.InterruptedReceiver = key; if (!pending) _settings.NoticeDismissed = false;
         _settings.InterruptionReason = error is null ? "unknown" : SessionInterruption.Find(error)?.Category ?? "unknown";
@@ -651,56 +647,14 @@ internal sealed class PlaybackController : IAsyncDisposable
         ? $"另一只音箱需等待{WaitDuration(RetrySeconds(row))}；现在可先用{row.Primary!.Name}播放。"
         : $"音箱要求等待{WaitDuration(RetrySeconds(row))}，期间不会重新验证。";
     private bool CanTestSound() => _session is not null && _audio is not null && !_settings.Interrupted && _sessionCancel?.IsCancellationRequested == false;
-    private VideoSyncState CurrentVideoState()
+    private GlobalSyncState CurrentGlobalSyncState()
     {
-        if (!CanTestSound() || _activeKey is null) return VideoSyncState.Offline;
-        return new(true, VideoSyncState.FromFrames(_session!.LatencyFrames, (_audio?.EstimatedCaptureLagMs ?? 0) + _settings.VideoCorrectionsMs.GetValueOrDefault(_activeKey)));
+        if (!CanTestSound() || _activeKey is null) return GlobalSyncState.Offline;
+        return new(true, GlobalSyncState.FromFrames(_session!.LatencyFrames, _audio?.EstimatedCaptureLagMs ?? 0));
     }
-    private async Task UpdateVideoSyncAsync(bool waitForPrior = false)
-    {
-        var state = CurrentVideoState(); _videoBridge?.Update(state);
-        var delay = state.Connected ? state.DelayMs : 0;
-        if (_videoPlayer is null) return;
-        if (!await _videoUpdateGate.WaitAsync(waitForPrior ? Timeout.Infinite : 0)) return;
-        try
-        {
-            state = CurrentVideoState(); delay = state.Connected ? state.DelayMs : 0;
-            if (_videoPlayer is null || delay == _lastVideoDelay) return;
-            if (_videoPlayer.HasExited) { _videoPlayer.Dispose(); _videoPlayer = null; _lastVideoDelay = -1; return; }
-            if (await _videoPlayer.SetDelayAsync(delay)) _lastVideoDelay = delay;
-            else { Log("本次播放器偏移未确认；请在播放器中检查音轨同步，关闭播放器后可重新同步打开。"); _lastVideoDelay = delay; }
-        }
-        finally { _videoUpdateGate.Release(); }
-    }
-    public string BrowserSyncDescription()
-    {
-        if (_videoBridge is null) return "本机浏览器接口暂不可用。";
-        var s = _videoBridge.CompanionStatus;
-        if (!s.Detected) return "尚未检测到浏览器助手。打开WinToPod本身不会改变网页画面。";
-        if (!CurrentVideoState().Connected) return "助手已检测到，连接音箱后自动同步。";
-        return s.Phase switch
-        {
-            "active" => $"正在补偿画面：已呈现{s.FramesPresented}帧，延后约{s.ObservedDelayMs}毫秒。",
-            "paused" => "视频已暂停，同步助手保持就绪。", "buffering" => "正在缓冲画面以对齐音箱。",
-            "unsupported" or "error" => "当前视频未能补偿，已保留原画面。请在扩展中检查兼容状态。",
-            _ => "助手已连接，等待视频播放。"
-        };
-    }
-    public VideoSyncState VideoState => CurrentVideoState();
-    public int VideoCorrection => (_activeKey ?? Selected?.Key) is { } key ? _settings.VideoCorrectionsMs.GetValueOrDefault(key) : 0;
-    public void SetVideoCorrection(int value)
-    {
-        if ((_activeKey ?? Selected?.Key) is not { } key) return;
-        _settings.VideoCorrectionsMs[key] = Math.Clamp(value, -1500, 1500); TrySaveSettings();
-    }
-    public async Task LaunchVideoAsync(string player, string media)
-    {
-        var current = CurrentVideoState(); if (!current.Connected) throw new ArgumentException("音箱已断开，请先重新连接。");
-        if (_videoPlayer is { HasExited: false }) throw new ArgumentException("请先关闭上次由WinToPod打开的播放器。");
-        _videoPlayer?.Dispose(); _videoPlayer = new(player, media, current.DelayMs); _lastVideoDelay = current.DelayMs;
-        if (_audio is not null) await _audio.IncludePlayerAsync(_videoPlayer.ProcessId, _sessionCancel?.Token ?? CancellationToken.None);
-        _settings.VideoPlayerPath = player; TrySaveSettings();
-    }
+    private void UpdateGlobalSync() => _globalSyncBridge?.Update(CurrentGlobalSyncState());
+    public bool GlobalSyncAvailable => _globalSyncBridge is not null;
+    public GlobalSyncState GlobalTiming => CurrentGlobalSyncState();
     public (bool Available, bool Active, bool CanStop, string Description) SoundTestState()
     {
         var state = _soundTest.Status;
@@ -783,7 +737,7 @@ internal sealed class PlaybackController : IAsyncDisposable
                 Groups = (_snapshot?.GroupCandidates ?? []).Select(g => new { g.TwoHomePods, g.Status, Members = g.MemberIds.Select(Token) }),
                 Selection = Selected is { } row ? new { Token = Token(row.Key), Primary = row.Primary is null ? null : Token(row.Primary.Id), HasEndpoint = row.HasIpv4Endpoint } : null,
                 ConnectActionEnabled = _connect.Enabled, Working = _working, Packets = _session?.PacketsSent, Resends = _session?.Retransmits, InputPeak = _audio?.Peak, CapturePcmGain = 1.0, CaptureMode = _audio?.CaptureMode, CaptureFallback = _audio?.CaptureFallback, CaptureReceivedFrames = _audio?.ReceivedFrames, CaptureDiscontinuities = _audio?.Discontinuities, InputPeakDbfs = _audio is { Peak: > 0 } meter ? (double?)(20 * Math.Log10(meter.Peak)) : null,
-                NegotiatedLatencyFrames = _session?.LatencyFrames, EstimatedLatencyMs = _session is null ? (int?)null : VideoSyncState.FromFrames(_session.LatencyFrames), AudioTimingForVideo = CurrentVideoState(), BrowserBridgeAvailable = _videoBridge is not null, BrowserCompanion = _videoBridge?.CompanionStatus ?? VideoCompanionStatus.Missing, CaptureLagEstimateMs = _audio?.EstimatedCaptureLagMs, InputBufferedFrames = _audio?.BufferedFrames, InputDroppedFrames = _audio?.DroppedFrames, InputMissingFrames = _audio?.MissingFrames,
+                NegotiatedLatencyFrames = _session?.LatencyFrames, EstimatedLatencyMs = _session is null ? (int?)null : GlobalSyncState.FromFrames(_session.LatencyFrames), GlobalSyncTiming = CurrentGlobalSyncState(), GlobalSyncBridgeAvailable = _globalSyncBridge is not null, CaptureLagEstimateMs = _audio?.EstimatedCaptureLagMs, InputBufferedFrames = _audio?.BufferedFrames, InputDroppedFrames = _audio?.DroppedFrames, InputMissingFrames = _audio?.MissingFrames,
                 MemberPackets = _session?.MemberPackets, VolumeLinkActive = _volumeLink is not null, SettingsEnabled = !_exiting, VolumePercent = _volume.Value, ConfirmedPanelVolumePercent = _session is not null && _activeKey is { } ownedKey ? (int?)_settings.Volumes.GetValueOrDefault(ownedKey) : null, Appearance = _settings.WinUiAppearance.ToString(), VolumeUpdateUnconfirmed = _volumeUnconfirmed, VolumeCurve = "desktop-calibrated-v1", ReceiverVolumeDb = _session is not null && _activeKey is { } volumeKey ? (double?)ReceiverVolume.Decibels(_settings.Volumes.GetValueOrDefault(volumeKey), ReceiverVolumeCurve.DesktopCalibrated) : null, CaptureRequiresPreMaster = true, WindowsEndpointVolume = _volumeLink?.Snapshot(),
                 PlaybackMode = _session is null ? "None" : _activeSingleFallback ? "SingleFallbackDualMono" : Selected?.IsGroup == true ? "NativePair" : "Single", PreferSingleForSelectedTarget = Selected is { } selectedTarget && _settings.SingleFallbackTargets.Contains(selectedTarget.Key),
                 PersistedInterruption = _settings.Interrupted, InterruptionReason = _settings.Interrupted ? Redact(_settings.InterruptionReason ?? "") : null
@@ -799,7 +753,7 @@ internal sealed class PlaybackController : IAsyncDisposable
         if (_scanTask is { } scan) await scan;
         _stats.Stop(); _volumeDebounce.Stop(); _volumePoll.Stop();
         _ui.CloseInterruption(); _localUse?.Dispose(); _localUse = null;
-        DetachVolumeLink(); _videoBridge?.Dispose(); _videoPlayer?.Dispose();
+        DetachVolumeLink(); _globalSyncBridge?.Dispose();
         _stats.Dispose(); _volumeDebounce.Dispose(); _volumePoll.Dispose();
         _pairingStore.Dispose(); _playbackCredentials.Dispose(); _disposed = true;
     }

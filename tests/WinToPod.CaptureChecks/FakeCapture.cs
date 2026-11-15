@@ -63,7 +63,7 @@ namespace WinToPod.Desktop
         private readonly Action<byte[], bool> _data;
         private bool _disposed;
         private ProcessAudioCapture(Action<byte[], bool> data) { _data = data; Instances.Add(this); }
-        internal static Task<ProcessAudioCapture> OpenAsync(Action<byte[], bool> data, Action<Exception> error, CancellationToken cancellation, uint? includedProcess = null)
+        internal static Task<ProcessAudioCapture> OpenAsync(Action<byte[], bool> data, Action<Exception> error, CancellationToken cancellation)
         { cancellation.ThrowIfCancellationRequested(); if (ActivationError is { } activationFailure) throw activationFailure; return Task.FromResult(new ProcessAudioCapture(data)); }
         internal void Emit(byte[] bytes, bool gap = false) { if (!_disposed) _data((byte[])bytes.Clone(), gap); }
         public void Dispose() => _disposed = true;

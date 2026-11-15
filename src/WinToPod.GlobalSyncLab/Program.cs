@@ -12,10 +12,18 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new LabWindow());
+        using var instance = new Mutex(false, @"Local\WinToPod.GlobalSyncLab");
+        bool acquired;
+        try { acquired = instance.WaitOne(0); } catch (AbandonedMutexException) { acquired = true; }
+        if (!acquired) { MessageBox.Show("全局补偿实验窗口已打开，请先在现有窗口操作。", "WinToPod"); return; }
+        try
+        {
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new LabWindow());
+        }
+        finally { instance.ReleaseMutex(); }
     }
 }
 
@@ -31,7 +39,8 @@ internal sealed class LabWindow : Form
     private readonly System.Threading.Timer _watchdog;
     private Overlay? _overlay;
     private bool _polling, _closing;
-    private int _delay;
+    private int _delay, _estimatedDelay;
+    private readonly NumericUpDown _correction = new() { Minimum = -1500, Maximum = 1500, Increment = 50, Width = 160 };
     private long _heartbeat;
     private int _overlayActive;
     private long _lastResponse;
@@ -40,7 +49,7 @@ internal sealed class LabWindow : Form
     public LabWindow()
     {
         Text = "WinToPod · 全局画面补偿实验";
-        ClientSize = new(560, 320); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
+        ClientSize = new(560, 400); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
         var layout = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new(20), FlowDirection = FlowDirection.TopDown, WrapContents = false };
         layout.Controls.Add(new Label { AutoSize = true, MaximumSize = new(500, 0),
             Text = "跨应用延后所选显示器画面，声音由正在运行的 WinToPod 发送。\n这是观看用实验，画质暂限960×540、约15fps；不会降低音频延迟。\n操作电脑前按 Ctrl+Alt+F8 退出。画面仅存内存，不保存、不上传。\nDRM、HDR、独占全屏及系统安全桌面不在本轮支持范围。" });
@@ -48,6 +57,10 @@ internal sealed class LabWindow : Form
         _screens.DisplayMember = nameof(Screen.DeviceName);
         if (_screens.Items.Count > 0) _screens.SelectedIndex = 0;
         layout.Controls.Add(_screens); layout.Controls.Add(_status); layout.Controls.Add(_start);
+        layout.Controls.Add(new Label { AutoSize = true, Text = "全局微调（毫秒）：正数让画面更晚，负数更早" });
+        layout.Controls.Add(_correction);
+        layout.Controls.Add(new Label { AutoSize = true, MaximumSize = new(500, 0), Text = "开始后固定本次延后值，避免估算波动反复中断画面。停止后可按最新估算重新开始。" });
+        _correction.ValueChanged += (_, _) => { StopOverlay(); UpdateDelay(); };
         Controls.Add(layout);
         _start.Click += (_, _) => StartOverlay();
         _poll.Tick += async (_, _) => await PollAsync();
@@ -68,23 +81,26 @@ internal sealed class LabWindow : Form
         _polling = true;
         try
         {
-            using var response = await _http.GetAsync("http://127.0.0.1:38765/video-sync", HttpCompletionOption.ResponseHeadersRead, _lifetime.Token);
+            using var response = await _http.GetAsync("http://127.0.0.1:38765/global-sync", HttpCompletionOption.ResponseHeadersRead, _lifetime.Token);
             if (response.StatusCode != HttpStatusCode.OK) throw new IOException();
             await response.Content.LoadIntoBufferAsync(16384, _lifetime.Token);
             var body = await response.Content.ReadAsByteArrayAsync(_lifetime.Token);
             if (body.Length > 16384) throw new IOException();
             using var json = JsonDocument.Parse(body);
             var root = json.RootElement;
-            if (root.GetProperty("protocol").GetString() != "WinToPod.VideoSync/1") throw new IOException();
+            if (root.GetProperty("protocol").GetString() != "WinToPod.GlobalSync/1") throw new IOException();
             var connected = root.GetProperty("connected").GetBoolean();
             var delay = root.GetProperty("delayMs").GetInt32();
             if (delay is < 0 or > 5000) throw new IOException();
             if (_closing) return;
             _connected = connected; _lastResponse = _clock.ElapsedMilliseconds;
-            if (delay != _delay) { StopOverlay(); _delay = delay; }
+            _estimatedDelay = delay;
+            // Capture estimates move in 10ms steps. Freeze the chosen delay for this
+            // viewing run instead of repeatedly tearing down and rebuffering the screen.
+            if (_overlay is null) UpdateDelay();
             if (!connected) StopOverlay();
-            _start.Enabled = connected && delay > 0 && _overlay is null;
-            _status.Text = connected ? $"音箱在线 · 建议延后 {_delay}ms（协议估算，非实测声学延迟）" : "请先在 WinToPod 连接音箱。";
+            _start.Enabled = connected && _delay > 0 && _overlay is null;
+            _status.Text = connected ? $"音箱在线 · 估算 {_estimatedDelay}ms · 本次延后 {_delay}ms（非实测声学延迟）" : "请先在 WinToPod 连接音箱。";
         }
         catch (Exception e) when (e is HttpRequestException or IOException or OperationCanceledException or JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {
@@ -94,6 +110,7 @@ internal sealed class LabWindow : Form
         }
         finally { _polling = false; }
     }
+    private void UpdateDelay() => _delay = Math.Clamp(_estimatedDelay + (int)_correction.Value, 0, 5000);
     private void StartOverlay()
     {
         if (!_connected || _delay <= 0 || _overlay is not null || _screens.SelectedItem is not Screen screen) return;
@@ -120,6 +137,7 @@ internal sealed class LabWindow : Form
         Volatile.Write(ref _overlayActive, 0);
         var overlay = _overlay; _overlay = null;
         overlay?.Dispose();
+        UpdateDelay();
         if (IsHandleCreated) Native.UnregisterHotKey(Handle, 1);
         _start.Enabled = !_closing && _connected && _delay > 0;
     }

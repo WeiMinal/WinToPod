@@ -12,7 +12,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Core build failed' }
     dotnet src/WinToPod.Checks/bin/Release/net10.0/WinToPod.Checks.dll | Tee-Object artifacts/validation/checks.txt
     if ($LASTEXITCODE -ne 0) { throw 'Core checks failed' }
-    foreach ($pair in @(@('--test-automatic-connection', 'automatic-connection.json'), @('--test-video-sync', 'video-sync.json'))) {
+    foreach ($pair in @(@('--test-automatic-connection', 'automatic-connection.json'), @('--test-global-sync', 'global-sync.json'))) {
         dotnet src/WinToPod.Checks/bin/Release/net10.0/WinToPod.Checks.dll $pair[0] | Set-Content -Encoding utf8 (Join-Path artifacts/validation $pair[1])
         if ($LASTEXITCODE -ne 0) { throw "Checks failed: $($pair[0])" }
     }
@@ -24,7 +24,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'WinUI publish failed' }
     & "$PSScriptRoot/BuildLauncher.ps1" -Output "$stage/WinToPod.exe"
     Get-ChildItem $stage -Recurse -Filter '*.pdb' | Remove-Item
-    Copy-Item -Recurse browser/WinToPod.VideoSync "$stage/app/浏览器音画补偿"
+    dotnet run --project tests/WinToPod.GlobalSyncChecks -c Release | Set-Content -Encoding utf8 artifacts/validation/global-sync-frames.json
+    if ($LASTEXITCODE -ne 0) { throw 'Global frame queue checks failed' }
+    dotnet publish src/WinToPod.GlobalSyncLab -c Release -r win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -m:1 -o "$stage/app/全局补偿"
+    if ($LASTEXITCODE -ne 0) { throw 'Global sync helper publish failed' }
+    Copy-Item docs/GLOBAL-SYNC-LAB.md "$stage/app/全局补偿/使用说明.md"
+    Copy-Item LICENSE "$stage/app/全局补偿/LICENSE"
     Copy-Item -Recurse licenses "$stage/app/licenses"
     Copy-Item LICENSE, THIRD-PARTY.md, CHANGELOG.md "$stage/app"
     Copy-Item docs/USAGE.md "$stage/使用说明.md"

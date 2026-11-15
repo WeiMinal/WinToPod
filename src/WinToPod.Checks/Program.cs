@@ -7,7 +7,7 @@ if (args.FirstOrDefault() == "--test-automatic-connection") return AutomaticConn
 
 if (args.FirstOrDefault() == "--test-digest") return await DigestChecks.Run(args);
 if (args.FirstOrDefault() == "--test-stability") return await StabilityChecks.Run(args);
-if (args.FirstOrDefault() == "--test-video-sync") return await VideoSyncChecks.Run();
+if (args.FirstOrDefault() == "--test-global-sync") return await GlobalSyncBridgeChecks.Run();
 
 if (args.FirstOrDefault() == "--test-native-pair")
 {

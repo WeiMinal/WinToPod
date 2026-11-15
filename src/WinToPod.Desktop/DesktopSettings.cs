@@ -31,8 +31,6 @@ internal sealed record DesktopSettings
     public bool NoticeDismissed { get; set; }
     public string? InterruptedReceiver { get; set; }
     public string InterruptionReason { get; set; } = "unknown";
-    public string? VideoPlayerPath { get; set; }
-    public Dictionary<string, int> VideoCorrectionsMs { get; init; } = new(StringComparer.Ordinal);
     public static string DirectoryPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinToPod");
     public static string FilePath => Path.Combine(DirectoryPath, "desktop-settings.json");
     public static DesktopSettings Load()
@@ -49,8 +47,6 @@ internal sealed record DesktopSettings
                 settings.UnmutedVolumes is null || settings.UnmutedVolumes.Count > 1024 || settings.UnmutedVolumes.Any(p => string.IsNullOrWhiteSpace(p.Key) || p.Value is < 1 or > 100) ||
                 settings.Volumes.Any(p => string.IsNullOrWhiteSpace(p.Key) || p.Value is < 0 or > 100) ||
                 settings.CaptureEndpointId is { } capture && (capture.Length > 4096 || string.IsNullOrWhiteSpace(capture) || capture.Any(char.IsControl)) ||
-                settings.VideoPlayerPath is { } player && (player.Length > 4096 || player.Any(char.IsControl)) ||
-                settings.VideoCorrectionsMs is null || settings.VideoCorrectionsMs.Count > 1024 || settings.VideoCorrectionsMs.Any(p => string.IsNullOrWhiteSpace(p.Key) || p.Value is < -1500 or > 1500) ||
                 settings.Interrupted && string.IsNullOrWhiteSpace(settings.InterruptedReceiver))
                 throw new InvalidDataException();
             // Older builds only remembered selection and confirmed volume, not

@@ -39,7 +39,7 @@ def main():
     text=(validation/'checks.txt').read_text(encoding='utf-8-sig')
     count=re.search(r'RESULT (\d+)/(\d+) passed',text)
     assert count and count[1]==count[2], 'Core checks missing/failed'
-    reports={name:checked_json(validation/(name+'.json')) for name in ['automatic-connection','video-sync','capture-interop','output-routing','controller']}
+    reports={name:checked_json(validation/(name+'.json')) for name in ['automatic-connection','global-sync','global-sync-frames','capture-interop','output-routing','controller']}
     capture=[json.loads(line) for line in (validation/'capture.jsonl').read_text(encoding='utf-8-sig').splitlines() if line.startswith('{')]
     assert len(capture)==4 and all(row['passed'] for row in capture)
     windows=checked_json(validation/'windows-ui.json') if (validation/'windows-ui.json').exists() else None

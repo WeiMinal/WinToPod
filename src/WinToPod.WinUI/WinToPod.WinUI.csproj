@@ -29,7 +29,7 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="../WinToPod.Desktop/Assets/DeviceIcons/*.svg" LogicalName="WinToPod.DeviceIcons.%(Filename)%(Extension)" />
-    <Compile Include="../WinToPod.Desktop/AudioSources.cs;../WinToPod.Desktop/ProcessAudioCapture.cs;../WinToPod.Desktop/EndpointVolumeLink.cs;../WinToPod.Desktop/DesktopSettings.cs;../WinToPod.Desktop/DesktopPairingStore.cs;../WinToPod.Desktop/DesktopPlaybackCredentialStore.cs;../WinToPod.Desktop/VideoPlayerSession.cs;../WinToPod.Desktop/LocalUseMonitor.cs;../WinToPod.Desktop/FrontendState.cs" Link="Services/%(Filename)%(Extension)" />
+    <Compile Include="../WinToPod.Desktop/AudioSources.cs;../WinToPod.Desktop/ProcessAudioCapture.cs;../WinToPod.Desktop/EndpointVolumeLink.cs;../WinToPod.Desktop/DesktopSettings.cs;../WinToPod.Desktop/DesktopPairingStore.cs;../WinToPod.Desktop/DesktopPlaybackCredentialStore.cs;../WinToPod.Desktop/LocalUseMonitor.cs;../WinToPod.Desktop/FrontendState.cs" Link="Services/%(Filename)%(Extension)" />
     <Content Include="../WinToPod.Desktop/Assets/Brand/*.ico;../WinToPod.Desktop/Assets/Brand/*-16.png;../WinToPod.Desktop/Assets/Brand/*-40.png;../WinToPod.Desktop/Assets/Brand/*-128.png" Link="Assets/Brand/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- This code-created app has no application PRI/XAML. Expose WinUI's

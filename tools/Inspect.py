@@ -37,7 +37,14 @@ def inspect(stage):
         data=(app/name).read_bytes()
         for text in [str(ROOT),'WinUI Demo','DemoApplication','20261027-settings-scroll']:
             assert text.encode() not in data and text.encode('utf-16-le') not in data, 'Local/development marker: '+name
-    assert not any(p.name.startswith(('PresentationFramework','System.Windows.Forms','WindowsFormsIntegration')) for p in files), 'Retired frontend runtime'
+    helper = app/'全局补偿'
+    pe((helper/'WinToPod.GlobalSyncLab.exe').read_bytes())
+    helper_runtime=json.loads((helper/'WinToPod.GlobalSyncLab.runtimeconfig.json').read_text())['runtimeOptions']
+    assert helper_runtime['includedFrameworks'], 'Global helper must be self-contained'
+    for name in ['WinToPod.GlobalSyncLab.dll', 'coreclr.dll', 'hostfxr.dll', '使用说明.md', 'LICENSE']:
+        assert (helper/name).is_file(), 'Missing global helper dependency: '+name
+    assert not any(p.name.startswith(('PresentationFramework','System.Windows.Forms','WindowsFormsIntegration')) for p in files if helper not in p.parents), 'Retired main frontend runtime'
+    assert not (app/'浏览器音画补偿').exists(), 'Retired browser component in runtime'
     return dict(passed=True, version='1.1', architecture='win-x64', file_version=expected,
         self_contained=True, files=len(files), windows_execution_tested_by_this_inspection=False,
         assembly_sha256={n:hashlib.sha256((app/n).read_bytes()).hexdigest() for n in ['WinToPod.dll','WinToPod.Core.dll','WinToPod.AirPlay.dll']})

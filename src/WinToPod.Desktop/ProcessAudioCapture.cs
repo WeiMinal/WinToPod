@@ -17,18 +17,17 @@ public sealed class ProcessAudioCapture : IDisposable
     private readonly Thread _thread;
     private readonly Action<byte[], bool> _data;
     private readonly Action<Exception> _error;
-    private readonly uint? _includedProcess;
     public static bool Supported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348);
     private int _disposed;
-    private ProcessAudioCapture(Action<byte[], bool> data, Action<Exception> error, uint? includedProcess)
+    private ProcessAudioCapture(Action<byte[], bool> data, Action<Exception> error)
     {
-        _data = data; _error = error; _includedProcess = includedProcess;
+        _data = data; _error = error;
         _thread = new Thread(Run) { IsBackground = true, Name = "WinToPod application audio" };
         _thread.SetApartmentState(ApartmentState.MTA); _thread.Start();
     }
-    public static async Task<ProcessAudioCapture> OpenAsync(Action<byte[], bool> data, Action<Exception> error, CancellationToken cancellation, uint? includedProcess = null)
+    public static async Task<ProcessAudioCapture> OpenAsync(Action<byte[], bool> data, Action<Exception> error, CancellationToken cancellation)
     {
-        var capture = new ProcessAudioCapture(data, error, includedProcess);
+        var capture = new ProcessAudioCapture(data, error);
         try { await capture._ready.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellation); return capture; }
         catch { capture.Dispose(); throw; }
     }
@@ -38,7 +37,7 @@ public sealed class ProcessAudioCapture : IDisposable
         try
         {
             var completion = new ActivationCompletion();
-            var args = new ActivationParameters { Type = 1, ProcessId = _includedProcess ?? (uint)Environment.ProcessId, Mode = _includedProcess is null ? 1 : 0 };
+            var args = new ActivationParameters { Type = 1, ProcessId = (uint)Environment.ProcessId, Mode = 1 };
             var blob = Marshal.AllocHGlobal(Marshal.SizeOf<ActivationParameters>());
             try
             {

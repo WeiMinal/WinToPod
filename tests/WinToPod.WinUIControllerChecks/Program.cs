@@ -3,8 +3,17 @@ using System.Text.Json;
 using WinToPod.Desktop;
 var checks = new List<string>();
 void Check(bool condition, string text) { if (!condition) throw new InvalidOperationException(text); checks.Add(text); }
+var legacy = JsonSerializer.Deserialize<DesktopSettings>("""
+    {"Schema":1,"Volumes":{"synthetic":37},"Interrupted":false,"SelectedReceiver":"synthetic",
+     "AutoConnectOnStart":false,"VideoPlayerPath":"old-player.exe","VideoCorrectionsMs":{"synthetic":900}}
+    """)!;
+Check(legacy.Volumes["synthetic"] == 37 && legacy.SelectedReceiver == "synthetic" && !legacy.AutoConnectOnStart,
+    "retiring player settings preserves receiver volume, selection and auto-connect preference");
+var saved = JsonSerializer.Serialize(legacy);
+Check(!saved.Contains("VideoPlayerPath", StringComparison.Ordinal) && !saved.Contains("VideoCorrectionsMs", StringComparison.Ordinal),
+    "retired player fields are discarded on save and never migrate to global delay");
 var ui = new FakeUi();
-var controller = new PlaybackController(new DesktopSettings(), ui, false, enableVideoBridge: false, enableAutomation: false);
+var controller = new PlaybackController(new DesktopSettings(), ui, false, enableGlobalSyncBridge: false, enableAutomation: false);
 Check(ui.State is { Connected: false, Working: false, CanConnect: false } && ui.State.Entries.Count == 0, "UI controller starts offline without selecting or connecting a receiver");
 controller.Mute();
 Check(ui.State is { Volume: 20, Connected: false, Working: false }, "mute on a disconnected UI cannot start, disconnect or alter a session");

@@ -9,7 +9,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 EXCLUDED = {'.git', 'bin', 'obj', 'artifacts', 'node_modules', '__pycache__', 'TestResults', '.vs', '.vscode', '.idea', '.venv', '.pytest_cache', '.DS_Store', 'Thumbs.db'}
 ROOT_FILES = {'README.md', 'LICENSE', 'CHANGELOG.md', 'THIRD-PARTY.md', 'Directory.Build.props', 'WinToPod.slnx', 'global.json', '.gitignore', '.gitattributes', '.editorconfig'}
-ROOT_FOLDERS = {'.github', 'src', 'tests', 'tools', 'browser', 'docs', 'licenses', 'packaging'}
+ROOT_FOLDERS = {'.github', 'src', 'tests', 'tools', 'docs', 'licenses', 'packaging'}
 
 
 def public_files():
@@ -42,10 +42,9 @@ def check():
                 problems.append('Private/development marker: ' + rel)
     props = (ROOT / 'Directory.Build.props').read_text(encoding='utf-8')
     if '<Version>1.1.0</Version>' not in props: problems.append('Product version differs from V1.1')
-    manifest = json.loads((ROOT / 'browser/WinToPod.VideoSync/manifest.json').read_text(encoding='utf-8'))
-    if manifest['version'] != '1.1.0': problems.append('Companion version differs from V1.1')
-    for name in manifest['icons'].values():
-        if not (ROOT / 'browser/WinToPod.VideoSync' / name).is_file(): problems.append('Missing browser icon: ' + name)
+    retired = ['browser', 'src/WinToPod.Desktop/VideoPlayerSession.cs', 'src/WinToPod.Core/VideoPlayerArguments.cs', 'src/WinToPod.Core/VideoSyncBridge.cs']
+    for name in retired:
+        if (ROOT / name).exists(): problems.append('Retired compensation component: ' + name)
     result = {'passed': not problems, 'public_files': len(files), 'problems': problems}
     print(json.dumps(result, indent=2))
     return 0 if result['passed'] else 1

@@ -40,10 +40,6 @@ def build():
         icon = BRAND / ('WinToPod.ico' if color == 'black' else 'WinToPod-dark.ico')
         icon.write_bytes(struct.pack('<HHH', 0, 1, len(SIZES)) + directory + b''.join(frames))
         sources[color] = {'sha256': hashlib.sha256(source.read_bytes()).hexdigest(), 'bounds': list(bounds)}
-    browser = ROOT / 'browser/WinToPod.VideoSync/icons'; browser.mkdir(exist_ok=True)
-    for color in ['black', 'white']:
-        for size in [16, 32, 48, 128]:
-            (browser / f'WinToPod-{color}-{size}.png').write_bytes((BRAND / f'WinToPod-{color}-{size}.png').read_bytes())
     report = {'transparent': True, 'plate': False, 'sizes': SIZES, 'sources': sources, 'logo_redesigned': False}
     print(json.dumps(report, indent=2))
 

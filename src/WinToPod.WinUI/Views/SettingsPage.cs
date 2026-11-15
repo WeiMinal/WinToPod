@@ -17,8 +17,8 @@ internal sealed class SettingsPage : Grid
     private readonly Dictionary<string, UIElement> _pages = new();
     private readonly Stack<string> _history = new();
     private string _current = "设置";
-    private TextBlock? _browser, _testHint, _connectionSummary, _appearanceSummary;
-    private Button? _test;
+    private TextBlock? _globalSync, _testHint, _connectionSummary, _appearanceSummary;
+    private Button? _test, _openGlobalSync;
     private RadioButtons? _policy;
     private ToggleSwitch? _startup, _auto, _hide, _single;
     private Preferences _saved;
@@ -53,7 +53,7 @@ internal sealed class SettingsPage : Grid
             var initializing = _initializing; _initializing = true;
             try
             {
-                view = name switch { "设置" => Home(), "外观" => Appearance(), "连接与播放" => Connection(), "音画补偿" => Video(), "浏览器补偿" => Browser(), "帮助与诊断" => Diagnostic(), "关于" => About(), _ => throw new ArgumentOutOfRangeException(nameof(name)) };
+                view = name switch { "设置" => Home(), "外观" => Appearance(), "连接与播放" => Connection(), "全局补偿" => GlobalSync(), "帮助与诊断" => Diagnostic(), "关于" => About(), _ => throw new ArgumentOutOfRangeException(nameof(name)) };
                 _pages.Add(name, view);
             }
             finally { _initializing = initializing; }
@@ -77,7 +77,7 @@ internal sealed class SettingsPage : Grid
         column.Children.Add(Ui.Card(NavigationRow("外观", AppearanceName(_controller.Settings.WinUiAppearance), () => Navigate("外观"), out _appearanceSummary), new Thickness(4)));
         var playback = Ui.Column(2);
         var connection = NavigationRow("连接与播放", "", () => Navigate("连接与播放"), out var summary); _connectionSummary = summary; playback.Children.Add(connection);
-        playback.Children.Add(NavigationRow("音画补偿", "浏览器或本地视频", () => Navigate("音画补偿"), out _));
+        playback.Children.Add(NavigationRow("全局补偿", "跨应用画面延后 · 实验功能", () => Navigate("全局补偿"), out _));
         column.Children.Add(Ui.Card(playback, new Thickness(4)));
         var support = Ui.Column(2);
         support.Children.Add(NavigationRow("帮助与诊断", "声音检查、连接记录", () => Navigate("帮助与诊断"), out _));
@@ -155,18 +155,17 @@ internal sealed class SettingsPage : Grid
         var draft = CurrentPreferences(); if (draft == _saved) return;
         _run(async () => { await _controller.SavePreferencesAsync(draft); _saved = draft; _feedback.Text = "已保存"; Refresh(); });
     }
-    private UIElement Video()
+    private UIElement GlobalSync()
     {
-        var column = Ui.Column(12); column.Children.Add(Ui.Hint("选择你观看视频的方式，查看对应的补偿设置。"));
-        column.Children.Add(NavigationRow("浏览器", "Edge / Chrome 浏览器助手", () => Navigate("浏览器补偿"), out _));
-        column.Children.Add(NavigationRow("本地视频", "使用 VLC 或 mpv 播放", () => _run(_window.ShowVideoToolsAsync), out _));
-        column.Children.Add(Ui.Hint("目前支持以上两种方式，系统级全局音画补偿仍在开发。")); return Scroll(column);
-    }
-    private UIElement Browser()
-    {
-        var column = Ui.Column(14); _browser = Ui.Hint(_controller.BrowserSyncDescription()); column.Children.Add(_browser);
-        column.Children.Add(Ui.Text("安装一次，之后自动跟随音箱，无需填写延迟。"));
-        column.Children.Add(Ui.Button("安装或更新浏览器助手", () => _run(_window.OpenBrowserHelperAsync))); return Scroll(column);
+        var column = Ui.Column(14);
+        column.Children.Add(Ui.Text("跨应用统一补偿", 16, true));
+        column.Children.Add(Ui.Hint("延后所选显示器的画面，适用于普通桌面应用。当前为观看实验，画质上限960×540、约15fps；不会降低音频延迟。"));
+        _globalSync = Ui.Hint(""); column.Children.Add(_globalSync);
+        _openGlobalSync = Ui.Button("打开全局补偿实验", () => _run(_window.OpenGlobalSyncAsync));
+        column.Children.Add(_openGlobalSync);
+        column.Children.Add(Ui.Hint("在实验窗口选择显示器并开始，可微调延后时间。操作电脑前按 Ctrl+Alt+F8 恢复实时画面；鼠标操作仍作用于实时桌面。"));
+        column.Children.Add(Ui.Hint("画面只在内存中缓存，不保存、不上传。受保护内容、HDR及独占全屏尚不支持。"));
+        return Scroll(column);
     }
     private UIElement Diagnostic()
     {
@@ -201,7 +200,14 @@ internal sealed class SettingsPage : Grid
     {
         if (_appearanceSummary is not null) _appearanceSummary.Text = AppearanceName(_controller.Settings.WinUiAppearance);
         if (_connectionSummary is not null) _connectionSummary.Text = (_policy?.SelectedIndex == 1 || _policy is null && _saved.Policy == ConnectionPolicy.Aggressive) ? "激进模式" : "保守模式（推荐）";
-        if (_browser is not null) _browser.Text = _controller.BrowserSyncDescription();
+        if (_globalSync is not null)
+        {
+            var state = _controller.GlobalTiming;
+            _globalSync.Text = !_controller.GlobalSyncAvailable ? "本机状态接口不可用。" : state.Connected
+                ? $"音箱已连接 · 建议延后 {state.DelayMs}ms（协议与采集估算，非实测声学延迟）"
+                : "请先连接音箱，再开始全局补偿实验。";
+        }
+        if (_openGlobalSync is not null) _openGlobalSync.IsEnabled = _controller.GlobalSyncAvailable;
         if (_test is not null && _testHint is not null)
         {
             var state = _controller.SoundTestState(); _testHint.Text = state.Description;

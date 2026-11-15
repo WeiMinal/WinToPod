@@ -20,4 +20,6 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet build src/WinToPod.Checks -c Release -m:1
       - run: dotnet run --project src/WinToPod.Checks -c Release --no-build
+      - run: dotnet run --project src/WinToPod.Checks -c Release --no-build -- --test-global-sync
+      - run: dotnet run --project tests/WinToPod.GlobalSyncChecks -c Release
       - run: python tools/CheckSource.py

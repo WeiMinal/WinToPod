@@ -7,15 +7,15 @@ try {
     $stage = Join-Path $projectRoot 'artifacts/win-x64'
     # A new staging directory prevents stale runtime files entering a release.
     if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+    # Validation must belong to this build, never a previous successful run.
+    if (Test-Path artifacts/validation) { Remove-Item -Recurse -Force artifacts/validation }
     New-Item -ItemType Directory -Force artifacts/validation | Out-Null
     dotnet build src/WinToPod.Checks -c Release -m:1
     if ($LASTEXITCODE -ne 0) { throw 'Core build failed' }
     dotnet src/WinToPod.Checks/bin/Release/net10.0/WinToPod.Checks.dll | Tee-Object artifacts/validation/checks.txt
     if ($LASTEXITCODE -ne 0) { throw 'Core checks failed' }
-    foreach ($pair in @(@('--test-automatic-connection', 'automatic-connection.json'))) {
-        dotnet src/WinToPod.Checks/bin/Release/net10.0/WinToPod.Checks.dll $pair[0] | Set-Content -Encoding utf8 (Join-Path artifacts/validation $pair[1])
-        if ($LASTEXITCODE -ne 0) { throw "Checks failed: $($pair[0])" }
-    }
+    dotnet src/WinToPod.Checks/bin/Release/net10.0/WinToPod.Checks.dll --test-automatic-connection | Set-Content -Encoding utf8 artifacts/validation/automatic-connection.json
+    if ($LASTEXITCODE -ne 0) { throw 'Automatic connection checks failed' }
     foreach ($pair in @(@('CaptureChecks', 'capture.jsonl'), @('CaptureInteropChecks', 'capture-interop.json'), @('OutputRoutingChecks', 'output-routing.json'), @('WinUIControllerChecks', 'controller.json'))) {
         dotnet run --project (Join-Path tests ('WinToPod.' + $pair[0])) -c Release | Set-Content -Encoding utf8 (Join-Path artifacts/validation $pair[1])
         if ($LASTEXITCODE -ne 0) { throw "Checks failed: $($pair[0])" }

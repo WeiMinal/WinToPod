@@ -160,7 +160,7 @@ class Udp(asyncio.DatagramProtocol):
                 assert self.owner.ptp and self.owner.peers_set
                 assert struct.unpack('>Q', data[20:28])[0] == (0x1122334455667788 if self.owner.follows else self.owner.sender_clock)
                 a, b = struct.unpack('>I', data[4:8])[0], struct.unpack('>I', data[16:20])[0]
-                assert (b - a) & 0xffffffff == 77175
+                assert (b - a) & 0xffffffff == getattr(self.owner, 'expected_lead', 88200)
                 assert struct.unpack('>Q', data[8:16])[0] > 0
                 self.owner.ptp_audio_syncs += 1
                 if self.owner.cohort:

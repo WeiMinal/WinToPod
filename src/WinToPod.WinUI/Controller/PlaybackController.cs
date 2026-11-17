@@ -649,7 +649,7 @@ internal sealed class PlaybackController : IAsyncDisposable
     private bool CanTestSound() => _session is not null && _audio is not null && !_settings.Interrupted && _sessionCancel?.IsCancellationRequested == false;
     public string AudioLatencyDescription => !CanTestSound() ? "连接后显示发送端缓冲与本机采集队列；实际出声延迟需另行测量。"
         : $"发送端播放提前量：{_session!.LatencyFrames * 1000d / 44100:F0}ms\n本机采集队列估算：{_audio!.EstimatedCaptureLagMs}ms\n以上均非实测声学延迟。" +
-          (_session.LatencyReports.Any(r => r.Decision == "receiver-window-incomplete-standard-target") ? "\n音箱未完整返回缓冲范围，本次保留标准目标。" : "");
+          (_session.LatencyReports.Any(r => r.Decision == "receiver-window-incomplete-requested-target") ? "\n音箱未完整返回缓冲范围，本次按实验目标及已知边界发送；实际出声需验证。" : "");
     public (bool Available, bool Active, bool CanStop, string Description) SoundTestState()
     {
         var state = _soundTest.Status;

@@ -104,10 +104,10 @@ internal static class PtpChecks
         });
         yield return Check("PTP音频锚点：28字节0xd7、数值纳秒、渲染位置与时钟身份", () =>
         {
-            var packet = NetworkClock.PtpSync(0xfffffff0, 12345678900, 55, true);
+            var packet = NetworkClock.PtpSync(0xfffffff0, 12345678900, 55, true, 26460);
             True(packet.Length == 28 && packet[0] == 0x90 && packet[1] == 0xd7 && packet[3] == 6);
             var a = BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(4));
-            True(unchecked(a - 11035) == 0xfffffff0 && unchecked(BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(16)) - a) == 77175);
+            True(a == 0xfffffff0 && unchecked(BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(16)) - a) == 26460);
             True(BinaryPrimitives.ReadUInt64BigEndian(packet.AsSpan(8)) == 12345678900 && BinaryPrimitives.ReadUInt64BigEndian(packet.AsSpan(20)) == 55);
         });
         yield return Check("跟随时钟：单个调度抖动不移动时间线，持续跳变使就绪过期", () =>

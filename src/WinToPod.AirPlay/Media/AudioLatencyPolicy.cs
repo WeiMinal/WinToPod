@@ -6,7 +6,7 @@ namespace WinToPod.AirPlay.Media;
 public enum AudioLatencyMode { Standard, ReducedExperimental }
 
 // These are sender scheduling values and receiver-reported limits, NOT measured
-// acoustic latency. Missing limits never grant permission to reduce buffering.
+// acoustic latency. Omitted response limits are not a request for a 2-second lead.
 public sealed record AudioLatencyReport(AudioLatencyMode Mode, uint RequestedFrames,
     uint? ReceiverMinimumFrames, uint? ReceiverMaximumFrames, uint SelectedFrames,
     uint? ArrivalToRenderMs, string Decision)
@@ -45,9 +45,9 @@ internal static class AudioLatencyPolicy
         if (lower > upper) throw new InvalidDataException("音箱音频缓冲范围不一致，已停止播放准备；不会向组合发送不同时间轴。");
         var reduced = reports[0].Mode == AudioLatencyMode.ReducedExperimental;
         var complete = reports.All(r => r.ReceiverMinimumFrames.HasValue && r.ReceiverMaximumFrames.HasValue);
-        var target = reduced && complete ? ReducedFrames : StandardFrames;
+        var target = reduced ? ReducedFrames : StandardFrames;
         var selected = Math.Clamp(target, lower, upper);
-        var decision = reduced && !complete ? "receiver-window-incomplete-standard-target"
+        var decision = reduced && !complete ? "receiver-window-incomplete-requested-target"
             : selected != target ? "clamped-to-common-receiver-window" : reduced ? "reduced-experiment" : "standard";
         return reports.Select(r => r with { SelectedFrames = selected, Decision = decision }).ToArray();
     }

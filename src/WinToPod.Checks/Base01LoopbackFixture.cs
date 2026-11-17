@@ -142,7 +142,7 @@ internal sealed class Base01LoopbackFixture : IAsyncDisposable
             if (packet[1] == 0xd7)
             {
                 if (last is null) throw new Exception("BASE-01 Sync没有对应的RTP包。");
-                var position = unchecked(BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(4)) - 11035);
+                var position = BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(4));
                 var ns = checked((long)BinaryPrimitives.ReadUInt64BigEndian(packet.AsSpan(8)));
                 OnPtpSync?.Invoke(last.Value, position, ns - EpochNanoseconds);
             }

@@ -21,3 +21,7 @@ Python srptools、cryptography、标准库plistlib仅用于独立交叉检查，
 Lucide设备图标包括speaker、laptop-minimal、tv-minimal和cast，固定修订、原文件SHA256见src/WinToPod.Desktop/Assets/DeviceIcons/SOURCE.md。组合为两个speaker并排。Windows Forms 框架许可仍随附于 licenses/WinForms-LICENSE.txt。
 
 Windows App SDK 组件许可和 NOTICE 以 licenses/WindowsAppSDK/ 下随附原件为准。
+
+## WinPods 低延迟协议参考
+
+参考 Ziyang Huang 的 [WinPods](https://github.com/sheepy928/WinPods/tree/5d6d291ad59dea5939547444ab9be52853b23903)，固定提交 `5d6d291ad59dea5939547444ab9be52853b23903`：对照 `crates/airplay/src/control.rs` 的PTP报文语义及 `session.rs` 的请求提前量选择，采用 `crates/airplay/tests/fixtures/anchors.json` 的11条D7报文向量交叉验证。未引入Rust运行时或替换现有配对/组合实现。Copyright (c) 2026 Ziyang Huang，MIT完整声明见 `licenses/WinPods-MIT.txt`，随源码与运行包分发。

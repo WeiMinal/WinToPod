@@ -42,6 +42,8 @@ async def main():
             if mode == 'latency-conflict':
                 peers[0].latency_fields['latencyMax'] = 22050
                 peers[1].latency_fields['latencyMin'] = 44100
+        for peer in peers:
+            peer.expected_lead = 44100 if mode == 'latency-clamped' else 26460 if mode in ['latency-reduced', 'latency-missing'] else 88200
         peers[1].requires_password = mode != 'no-password'
         peers[1].pairing_password = 'demo-secondary-secret' if mode != 'no-password' else None
         peers[1].bad_m6_signature = mode == 'bad-m6-signature'

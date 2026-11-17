@@ -32,14 +32,14 @@ public sealed class NetworkClock
         BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(4), unchecked(nextTimestamp - latencySamples));
         BinaryPrimitives.WriteUInt64BigEndian(packet.AsSpan(8), ntp); BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(16), nextTimestamp); return packet;
     }
-    public static byte[] PtpSync(uint renderPosition, long masterNanoseconds, ulong clockId, bool first)
+    public static byte[] PtpSync(uint renderPosition, long masterNanoseconds, ulong clockId, bool first, uint latencySamples)
     {
         var packet = new byte[28]; packet[0] = first ? (byte)0x90 : (byte)0x80; packet[1] = 0xd7; packet[3] = 6;
-        // Receiver interpretation: field1 - 11035 renders at masterNanoseconds.
-        var field1 = unchecked(renderPosition + 11035);
-        BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(4), field1);
+        // PTP anchor: render position at master time, followed by the send head.
+        // See WinPods control.rs; both fields must describe the selected lead.
+        BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(4), renderPosition);
         BinaryPrimitives.WriteUInt64BigEndian(packet.AsSpan(8), checked((ulong)masterNanoseconds));
-        BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(16), unchecked(field1 + 77175));
+        BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(16), unchecked(renderPosition + latencySamples));
         BinaryPrimitives.WriteUInt64BigEndian(packet.AsSpan(20), clockId); return packet;
     }
 }

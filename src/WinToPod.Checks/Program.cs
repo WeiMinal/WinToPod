@@ -58,7 +58,7 @@ if (args.FirstOrDefault() == "--test-native-pair")
         if (mode.StartsWith("latency-", StringComparison.Ordinal))
         {
             if (mode == "latency-conflict") throw new Exception("Conflicting group window became ready.");
-            var expectedLead = mode switch { "latency-reduced" => 26460, "latency-clamped" => 44100, _ => 88200 };
+            var expectedLead = mode switch { "latency-reduced" or "latency-missing" => 26460, "latency-clamped" => 44100, _ => 88200 };
             if (playback.LatencyFrames != expectedLead || playback.LatencyReports.Any(r => r.SelectedFrames != expectedLead))
                 throw new Exception("Group did not use the negotiated common lead.");
             Console.WriteLine("AUDIO_SENDER_LEAD_FRAMES=" + expectedLead);

@@ -428,7 +428,7 @@ public sealed class RealtimeAudioSession : IAsyncDisposable
                         // moving send head or re-anchor a live stream on a tick.
                         var elapsedSamples = (long)(((Int128)ptp.TimeNanoseconds - origin.TimeNanoseconds) * 44100 / 1_000_000_000);
                         var position = unchecked(initialTimestamp - _latency + (uint)elapsedSamples);
-                        sync = NetworkClock.PtpSync(position, ptp.TimeNanoseconds, ptp.ClockId, first);
+                        sync = NetworkClock.PtpSync(position, ptp.TimeNanoseconds, ptp.ClockId, first, _latency);
                     }
                     else sync = NetworkClock.Sync(_timestamp, _latency, _clock.NtpNow, first);
                     foreach (var member in members) await member._control.SendAsync(sync, member._controlEndpoint!, linked.Token).ConfigureAwait(false);
